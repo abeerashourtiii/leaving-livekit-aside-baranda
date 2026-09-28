@@ -116,7 +116,13 @@ https://<your-project-ref>.supabase.co/functions/v1/livekit-webhook
 In Supabase Dashboard → Authentication → URL Configuration → Redirect URLs, add:
 ```
 diarino://auth-callback
+https://**.app.github.dev/**
 ```
+The wildcard is for temporary GitHub Codespaces web origins. Set the
+production **Site URL** to the deployed web app's permanent origin; do not
+use a Codespaces URL as the production Site URL. The web client returns to
+the current origin and handles OAuth tokens there, including when Supabase
+falls back to the root URL.
 
 ### Required manual step: enabling guest mode ("المتابعة كضيف")
 

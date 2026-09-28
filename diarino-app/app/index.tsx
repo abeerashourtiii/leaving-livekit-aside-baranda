@@ -7,13 +7,22 @@ import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Rect, Path } from "react-native-svg";
-import { signInWithGoogle, signInAsGuest } from "../lib/hooks/useAuth";
+import { completeOAuthCallback, signInWithGoogle, signInAsGuest } from "../lib/hooks/useAuth";
 import { getAuthSnapshot, subscribeAuthState, useCurrentUser } from "../lib/hooks/useCurrentUser";
 import { supabase } from "../lib/supabase";
 import { useThemeColors, ThemeColors } from "../lib/hooks/useThemeColors";
 
 const SKIP_KEY = "diarino:skip_auth";
 const INTRO_DURATION_MS = 1600;
+
+function hasOAuthCallbackParams(): boolean {
+  if (Platform.OS !== "web" || typeof window === "undefined") return false;
+  const url = new URL(window.location.href);
+  const hashParams = new URLSearchParams(url.hash.slice(1));
+  return ["access_token", "refresh_token", "code", "error", "error_description"].some(
+    (key) => url.searchParams.has(key) || hashParams.has(key),
+  );
+}
 
 export default function AuthGateScreen() {
   const [showIntro, setShowIntro] = useState(true);
@@ -22,6 +31,7 @@ export default function AuthGateScreen() {
   const [skipped, setSkipped] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [signingInGuest, setSigningInGuest] = useState(false);
+  const [isCompletingOAuth, setIsCompletingOAuth] = useState(hasOAuthCallbackParams);
   const [error, setError] = useState<string | null>(null);
   const { user: currentUser, loading: authLoading } = useCurrentUser();
   const themeColors = useThemeColors();
@@ -60,6 +70,28 @@ export default function AuthGateScreen() {
 
     return () => { mounted = false; unsubscribe(); };
   }, [authLoading, currentUser]);
+
+  useEffect(() => {
+    if (!isCompletingOAuth || Platform.OS !== "web" || typeof window === "undefined") return;
+
+    let mounted = true;
+    const callbackUrl = window.location.href;
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    completeOAuthCallback(callbackUrl)
+      .then(({ error: callbackError }) => {
+        if (mounted && callbackError) setError(callbackError);
+      })
+      .catch((callbackError: unknown) => {
+        if (!mounted) return;
+        setError(callbackError instanceof Error ? callbackError.message : "تعذر إكمال تسجيل الدخول.");
+      })
+      .finally(() => {
+        if (mounted) setIsCompletingOAuth(false);
+      });
+
+    return () => { mounted = false; };
+  }, [isCompletingOAuth]);
 
   useEffect(() => {
     if (loading || (!hasSession && !skipped)) return;
@@ -166,7 +198,7 @@ export default function AuthGateScreen() {
     return <IntroSplash />;
   }
 
-  if (loading) {
+  if (loading || isCompletingOAuth) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator color="#22A652" size="large" />

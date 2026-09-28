@@ -16,9 +16,10 @@ export default function AuthCallback() {
         // OAuth is completed here exactly once. Native completes through the
         // same helper before returning from WebBrowser.
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          const callbackResult = await completeOAuthCallback(window.location.href);
-          if (callbackResult.error) throw new Error(callbackResult.error);
+          const callbackUrl = window.location.href;
           window.history.replaceState({}, document.title, window.location.pathname);
+          const callbackResult = await completeOAuthCallback(callbackUrl);
+          if (callbackResult.error) throw new Error(callbackResult.error);
           if (isMounted) {
             router.replace('/(tabs)');
             return;

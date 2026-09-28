@@ -40,7 +40,7 @@ export function translateOAuthError(raw: string): string {
 }
 
 export async function completeOAuthCallback(rawUrl: string): Promise<{ error: string | null }> {
-  console.log("[Auth] completeOAuthCallback called with URL:", rawUrl);
+  console.log("[Auth] Processing OAuth callback.");
   if (callbackUrl === rawUrl && callbackSessionPromise) return callbackSessionPromise;
   callbackUrl = rawUrl;
   callbackSessionPromise = completeOAuthCallbackOnce(rawUrl);
@@ -87,15 +87,16 @@ async function completeOAuthCallbackOnce(rawUrl: string): Promise<{ error: strin
       console.error("[Auth] OAuth Callback failed: No tokens, code, or error description found in URL.");
     }
     return { error: translateOAuthError(errorDescription || "") };
-  } catch (e: any) {
-    console.error("[Auth] Exception during completeOAuthCallbackOnce:", e?.message || e);
-    return { error: translateOAuthError(e?.message || "") };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[Auth] Exception during completeOAuthCallbackOnce:", message);
+    return { error: translateOAuthError(message) };
   }
 }
 
 export function getOAuthRedirectUri(): string {
   if (Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin) {
-    return `${window.location.origin}/auth-callback`;
+    return `${window.location.origin}/`;
   }
   return Linking.createURL("auth-callback");
 }
@@ -126,7 +127,7 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
         return { error: translateOAuthError(error.message) };
       }
       if (data?.url) {
-        console.log("[Auth Web] Redirecting window to:", data.url);
+        console.log("[Auth Web] Redirecting to Supabase OAuth provider.");
         window.location.href = data.url;
       }
       return { error: null };
@@ -151,7 +152,7 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
       return { error: translateOAuthError(error?.message || "") };
     }
 
-    console.log("[Auth Native] Opening WebBrowser session with URL:", data.url);
+    console.log("[Auth Native] Opening OAuth session in browser.");
     const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUri, {
       showInRecents: true,
     });
@@ -198,9 +199,10 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
 
     console.log("[Auth Native] Google Sign-In finished successfully.");
     return { error: null };
-  } catch (err: any) {
-    console.error("[Auth] Unhandled exception in signInWithGoogle:", err?.message || err);
-    return { error: translateOAuthError(err?.message || "") };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[Auth] Unhandled exception in signInWithGoogle:", message);
+    return { error: translateOAuthError(message) };
   }
 }
 
