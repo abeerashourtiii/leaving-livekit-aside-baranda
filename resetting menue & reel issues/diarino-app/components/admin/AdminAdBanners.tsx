@@ -7,7 +7,7 @@ import { useAdCarouselSettings, useUpdateAdCarouselSettings } from "../../lib/ho
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useLogMedia } from "../../lib/hooks/useMedia";
-import { uploadToCloudinary, cldOptimized, cldCrop, isVideoUrl, VIDEO_AS_IMAGE_MESSAGE } from "../../lib/cloudinary";
+import { uploadToCloudinary, cldOptimized, cldCrop, isVideoUrl, VIDEO_AS_IMAGE_MESSAGE, CloudinaryUploadError } from "../../lib/cloudinary";
 import { CascadeImage } from "../shared/CascadeImage";
 import { ImageCropModal, CropRect } from "./ImageCropModal";
 import { AD_BANNER_ASPECT, AD_BANNER_SPEC_TEXT, AD_BANNER_WIDTH, AD_BANNER_HEIGHT } from "../../lib/adBannerSpec";
@@ -52,7 +52,6 @@ export function AdminAdBanners() {
   const [imageInfo, setImageInfo] = useState<string>("");
   const [uploadingImage, setUploadingImage] = useState(false);
   const [cropSource, setCropSource] = useState<string | null>(null);
-  const [cropSourceMimeType, setCropSourceMimeType] = useState<string | null>(null);
   const [linkUrl, setLinkUrl] = useState("");
   const [days, setDays] = useState("7");
 
@@ -73,11 +72,10 @@ export function AdminAdBanners() {
     const asset = result.assets[0];
     // ↔ بعض معارض أندرويد بتسمح باختيار فيديو حتى مع فلتر الصور — إعلان بفيديو كان بيتخزّن برابط .mp4
     //   وCloudinary بيرجّع 400 عند عرضه كصورة (صندوق أسود). نرفضه من الأول.
-    if (asset.type === "video" || asset.mimeType?.startsWith("video/") || (!asset.mimeType && isVideoUrl(asset.uri))) {
+    if (asset.type === "video" || asset.mimeType?.startsWith("video/") || isVideoUrl(asset.uri)) {
       Alert.alert("اختر صورة", VIDEO_AS_IMAGE_MESSAGE);
       return;
     }
-    setCropSourceMimeType(asset.mimeType ?? null);
     setCropSource(asset.uri);
   }
 
@@ -89,7 +87,7 @@ export function AdminAdBanners() {
     if (!uri) return;
     setUploadingImage(true);
     try {
-      const up = await uploadToCloudinary(uri, "image", undefined, cropSourceMimeType);
+      const up = await uploadToCloudinary(uri, "image");
       if (user?.id) logMedia.mutate({ ownerId: user.id, type: "image", context: "other", result: up });
       // أبعاد Cloudinary بعد تدوير EXIF؛ لو اتبدّل الطول/العرض مقارنة بما شفناه فى النافذة نبدّلهم.
       let sw = up.width ?? natural.width;
@@ -113,7 +111,7 @@ export function AdminAdBanners() {
       setImageUrl(finalUrl);
       setImageInfo(note);
     } catch (e) {
-      Alert.alert("تعذر رفع الصورة", e instanceof Error && e.message === VIDEO_AS_IMAGE_MESSAGE ? VIDEO_AS_IMAGE_MESSAGE : "حاول مرة أخرى.");
+      Alert.alert("تعذر رفع الصورة", e instanceof CloudinaryUploadError ? e.message : "حاول مرة أخرى.");
     } finally {
       setUploadingImage(false);
     }
