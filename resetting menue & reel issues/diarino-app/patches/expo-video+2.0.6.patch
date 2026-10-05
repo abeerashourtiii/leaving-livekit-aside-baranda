@@ -1,0 +1,313 @@
+diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/PiPSessionFragment.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/PiPSessionFragment.kt
+new file mode 100644
+index 0000000..865a2d4
+--- /dev/null
++++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/PiPSessionFragment.kt
+@@ -0,0 +1,17 @@
++package expo.modules.video
++
++import androidx.fragment.app.Fragment
++import java.util.UUID
++
++// [diarino patch] Lives for the duration of one PiP session. It is independent of any VideoView's lifecycle, so
++// the app UI is always restored when PiP ends, even if the view that started PiP was unmounted meanwhile.
++class PiPSessionFragment : Fragment() {
++  val id = "${PiPSessionFragment::class.java.simpleName}_${UUID.randomUUID()}"
++
++  override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
++    super.onPictureInPictureModeChanged(isInPictureInPictureMode)
++    if (!isInPictureInPictureMode) {
++      VideoView.exitPiPSession()
++    }
++  }
++}
+diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/PictureInPictureHelperFragment.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/PictureInPictureHelperFragment.kt
+index 4a2b11d..a666548 100644
+--- a/node_modules/expo-video/android/src/main/java/expo/modules/video/PictureInPictureHelperFragment.kt
++++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/PictureInPictureHelperFragment.kt
+@@ -9,8 +9,11 @@ class PictureInPictureHelperFragment(private val videoView: VideoView) : Fragmen
+   override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+     super.onPictureInPictureModeChanged(isInPictureInPictureMode)
+ 
++    // [diarino patch] each mounted VideoView has its own fragment, but only one view may own PiP, and leaving
++    // PiP is handled once for the whole app (VideoView.exitPiPSession is idempotent).
+     if (isInPictureInPictureMode) {
+-      // We can't reliably detect when the PiP transition starts (while keeping the transition smooth 🙄), so we have to
++      if (!videoView.claimPiPOwnership()) return
++      // We can't reliably detect when the PiP transition starts (while keeping the transition smooth), so we have to
+       // unpause the playback after the onPause event, is called right after onPause. So the pause is not noticeable
+       if (videoView.wasAutoPaused) {
+         videoView.playerView.player?.play()
+@@ -18,9 +21,7 @@ class PictureInPictureHelperFragment(private val videoView: VideoView) : Fragmen
+       videoView.layoutForPiPEnter()
+       videoView.onPictureInPictureStart(Unit)
+     } else {
+-      videoView.willEnterPiP = false
+-      videoView.layoutForPiPExit()
+-      videoView.onPictureInPictureStop(Unit)
++      VideoView.exitPiPSession()
+     }
+   }
+ }
+diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/VideoView.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/VideoView.kt
+index 6e60960..345e4a7 100644
+--- a/node_modules/expo-video/android/src/main/java/expo/modules/video/VideoView.kt
++++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/VideoView.kt
+@@ -20,6 +20,7 @@ import expo.modules.video.delegates.IgnoreSameSet
+ import expo.modules.video.enums.ContentFit
+ import expo.modules.video.player.VideoPlayer
+ import expo.modules.video.player.VideoPlayerListener
++import expo.modules.video.utils.applyAspectRatio
+ import expo.modules.video.utils.applyAutoEnterPiP
+ import expo.modules.video.utils.applyRectHint
+ import expo.modules.video.utils.calculateRectHint
+@@ -45,15 +46,14 @@ class VideoView(context: Context, appContext: AppContext) : ExpoView(context, ap
+   var showsSubtitlesButton = false
+     private set
+ 
+-  private val currentActivity = appContext.throwingActivity
++  internal val currentActivity = appContext.throwingActivity
+   private val decorView = currentActivity.window.decorView
+   private val rootView = decorView.findViewById<ViewGroup>(android.R.id.content)
+ 
+-  private val rootViewChildrenOriginalVisibility: ArrayList<Int> = arrayListOf()
+   private var pictureInPictureHelperTag: String? = null
+ 
+-  var autoEnterPiP: Boolean by IgnoreSameSet(false) { new, _ ->
+-    applyAutoEnterPiP(currentActivity, new)
++  var autoEnterPiP: Boolean by IgnoreSameSet(false) { _, _ ->
++    refreshAutoEnterPiP()
+   }
+ 
+   var contentFit: ContentFit = ContentFit.CONTAIN
+@@ -194,29 +194,78 @@ class VideoView(context: Context, appContext: AppContext) : ExpoView(context, ap
+   }
+ 
+   /**
+-   * For optimal picture in picture experience it's best to only have one view. This method
+-   * hides all children of the root view and makes the player the only visible child of the rootView.
++   * [diarino patch] PiP layout rewritten around ONE app-wide session (see PiPSession in the companion).
++   *
++   * Original behaviour (expo-video 2.0.6): every mounted VideoView has its own helper fragment, Android
++   * notifies ALL of them, and each one hid the root children and added its own player — so with several
++   * VideoViews (one per reel card) the layout got interleaved, the wrong/last view's player was shown, and
++   * leaving PiP crashed with IndexOutOfBoundsException (empty visibility list) in layoutForPiPExit.
++   *
++   * Now: only one view (the owner) enters; the session stores everything needed to restore the layout and is
++   * independent of the owner's React lifecycle (the reels list may unmount/remount items while in PiP);
++   * leaving PiP is handled once, by whichever fragment is notified first (or the session's own fragment).
+    */
+   fun layoutForPiPEnter() {
++    if (pipSession != null) return
+     playerView.useController = false
+     (playerView.parent as? ViewGroup)?.removeView(playerView)
++    val visibilities = ArrayList<Int>()
+     for (i in 0 until rootView.childCount) {
+-      if (rootView.getChildAt(i) != playerView) {
+-        rootViewChildrenOriginalVisibility.add(rootView.getChildAt(i).visibility)
+-        rootView.getChildAt(i).visibility = View.GONE
+-      }
++      val child = rootView.getChildAt(i)
++      visibilities.add(child.visibility)
++      child.visibility = View.GONE
+     }
+     rootView.addView(playerView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
++    val sessionFragment = PiPSessionFragment()
++    pipSession = PiPSession(java.lang.ref.WeakReference(this), playerView, rootView, visibilities, sessionFragment.id)
++    (currentActivity as? FragmentActivity)?.supportFragmentManager?.beginTransaction()
++      ?.add(sessionFragment, sessionFragment.id)
++      ?.commitAllowingStateLoss()
+   }
+ 
++  /** Kept for API compatibility with the helper fragment: leaves the app-wide PiP session (idempotent). */
+   fun layoutForPiPExit() {
+-    playerView.useController = useNativeControls
+-    rootView.removeView(playerView)
+-    for (i in 0 until rootView.childCount) {
+-      rootView.getChildAt(i).visibility = rootViewChildrenOriginalVisibility[i]
++    exitPiPSession()
++  }
++
++  /**
++   * Only ONE view may start the PiP session: the one that explicitly requested it (willEnterPiP), the one
++   * configured to auto-enter (autoEnterPiP) or, as a fallback, the one that is currently playing.
++   */
++  fun claimPiPOwnership(): Boolean {
++    if (!isAttachedToWindow) return false
++    pipSession?.let { return it.owner.get() === this }
++    return willEnterPiP || autoEnterPiP || playerView.player?.isPlaying == true
++  }
++
++  /**
++   * `setPictureInPictureParams` is a property of the ACTIVITY, but it used to be written by every VideoView
++   * (attach, detach, prop change) — a neighbour attaching/detaching in the reels list turned auto-enter off
++   * for the active reel. Now the activity flag is "does any attached view want it".
++   */
++  private fun refreshAutoEnterPiP(detaching: Boolean = false) {
++    if (autoEnterPiP && !detaching && !isInFullscreen && isAttachedToWindow) {
++      autoEnterViews.add(this)
++    } else {
++      autoEnterViews.remove(this)
++    }
++    applyAutoEnterPiP(currentActivity, autoEnterViews.isNotEmpty())
++  }
++
++  /** Keeps the PiP window's shape equal to the video (portrait reels -> portrait window). */
++  private fun refreshPiPAspectRatio() {
++    val size = playerView.player?.videoSize ?: return
++    if (size.width <= 0 || size.height <= 0) return
++    val ratio = size.width.toFloat() / size.height.toFloat()
++    val clamped = ratio.coerceIn(0.4184f, 2.39f) // Android only accepts [1:2.39, 2.39:1]
++    applyAspectRatio(currentActivity, Rational((clamped * 1000).toInt(), 1000))
++  }
++
++  fun removeHelperFragment() {
++    (currentActivity as? FragmentActivity)?.let {
++      val fragment = it.supportFragmentManager.findFragmentByTag(pictureInPictureHelperTag ?: "") ?: return
++      it.supportFragmentManager.beginTransaction().remove(fragment).commitAllowingStateLoss()
+     }
+-    rootViewChildrenOriginalVisibility.clear()
+-    this.addView(playerView)
+   }
+ 
+   override fun onTracksChanged(player: VideoPlayer, tracks: Tracks) {
+@@ -239,7 +288,12 @@ class VideoView(context: Context, appContext: AppContext) : ExpoView(context, ap
+     // On every re-layout ExoPlayer resets the timeBar to be enabled.
+     // We need to disable it to keep scrubbing impossible.
+     playerView.setTimeBarInteractive(videoPlayer?.requiresLinearPlayback ?: true)
+-    applyRectHint(currentActivity, calculateRectHint(playerView))
++    // [diarino patch] only views that can actually enter PiP publish the transition rect / aspect ratio
++    // (every neighbour in the reels list used to overwrite it with its own off-screen rect).
++    if ((autoEnterPiP || willEnterPiP) && pipSession == null) {
++      applyRectHint(currentActivity, calculateRectHint(playerView))
++      refreshPiPAspectRatio()
++    }
+   }
+ 
+   override fun onAttachedToWindow() {
+@@ -251,22 +305,59 @@ class VideoView(context: Context, appContext: AppContext) : ExpoView(context, ap
+         .add(fragment, fragment.id)
+         .commitAllowingStateLoss()
+     }
+-    applyAutoEnterPiP(currentActivity, autoEnterPiP)
++    refreshAutoEnterPiP()
+   }
+ 
+   override fun onDetachedFromWindow() {
+     super.onDetachedFromWindow()
+-    (currentActivity as? FragmentActivity)?.let {
+-      val fragment = it.supportFragmentManager.findFragmentByTag(pictureInPictureHelperTag ?: "")
+-        ?: return
+-      it.supportFragmentManager.beginTransaction()
+-        .remove(fragment)
+-        .commitAllowingStateLoss()
+-    }
+-    applyAutoEnterPiP(currentActivity, false)
++    refreshAutoEnterPiP(detaching = true)
++    // [diarino patch] if THIS view owns the running PiP session (the reels list unmounted it while the app is
++    // in PiP) keep the PiP layout and its helper fragment alive: the session restores the UI when PiP ends.
++    if (pipSession?.owner?.get() === this) return
++    removeHelperFragment()
+   }
+ 
+   companion object {
++    // [diarino patch] app-wide PiP state (all VideoViews share one Activity)
++    class PiPSession(
++      val owner: java.lang.ref.WeakReference<VideoView>,
++      val playerView: PlayerView,
++      val rootView: ViewGroup,
++      val visibilities: ArrayList<Int>,
++      val fragmentTag: String
++    )
++
++    @Volatile
++    var pipSession: PiPSession? = null
++    private val autoEnterViews: MutableSet<VideoView> = java.util.Collections.newSetFromMap(java.util.WeakHashMap<VideoView, Boolean>())
++
++    /** Restores the app UI after PiP. Safe to call any number of times / from any fragment. */
++    @JvmStatic
++    fun exitPiPSession() {
++      val session = pipSession ?: return
++      pipSession = null
++      val owner = session.owner.get()
++      session.playerView.useController = owner?.useNativeControls ?: false
++      session.rootView.removeView(session.playerView)
++      for (i in 0 until session.rootView.childCount) {
++        session.rootView.getChildAt(i).visibility = session.visibilities.getOrNull(i) ?: View.VISIBLE
++      }
++      if (owner != null) {
++        owner.willEnterPiP = false
++        if (owner.isAttachedToWindow) {
++          owner.addView(session.playerView)
++          owner.onPictureInPictureStop(Unit)
++        } else {
++          // the owner was unmounted meanwhile: no JS view to notify, just drop its helper fragment
++          owner.removeHelperFragment()
++        }
++      }
++      (owner?.currentActivity as? FragmentActivity)?.let { activity ->
++        val fragment = activity.supportFragmentManager.findFragmentByTag(session.fragmentTag) ?: return@let
++        activity.supportFragmentManager.beginTransaction().remove(fragment).commitAllowingStateLoss()
++      }
++    }
++
+     fun isPictureInPictureSupported(currentActivity: Activity): Boolean {
+       return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && currentActivity.packageManager.hasSystemFeature(
+         android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE
+diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/utils/PictureInPictureUtils.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/utils/PictureInPictureUtils.kt
+index 84aafec..1c1cfba 100644
+--- a/node_modules/expo-video/android/src/main/java/expo/modules/video/utils/PictureInPictureUtils.kt
++++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/utils/PictureInPictureUtils.kt
+@@ -34,14 +34,38 @@ internal fun calculateRectHint(playerView: PlayerView): Rect {
+   return hint
+ }
+ 
+-internal fun applyRectHint(activity: Activity, rectHint: Rect) {
++// [diarino patch] setPictureInPictureParams() REPLACES all PiP params of the activity. The original
++// applyRectHint() / applyAutoEnterPiP() each built a fresh Builder with only their own field, so every
++// onLayout of any VideoView (applyRectHint) silently reset `autoEnterEnabled` to false (and vice versa the
++// rect hint / aspect ratio were wiped). All callers now go through one place that keeps the full state.
++private object PiPParamsState {
++  var rectHint: Rect? = null
++  var autoEnter: Boolean = false
++  var aspectRatio: android.util.Rational? = null
++}
++
++private fun pushPiPParams(activity: Activity) {
+   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isPictureInPictureSupported(activity)) {
+     runWithPiPMisconfigurationSoftHandling {
+-      activity.setPictureInPictureParams(PictureInPictureParams.Builder().setSourceRectHint(rectHint).build())
++      val builder = PictureInPictureParams.Builder()
++      PiPParamsState.rectHint?.let { builder.setSourceRectHint(it) }
++      PiPParamsState.aspectRatio?.let { builder.setAspectRatio(it) }
++      if (Build.VERSION.SDK_INT >= 31) builder.setAutoEnterEnabled(PiPParamsState.autoEnter)
++      activity.setPictureInPictureParams(builder.build())
+     }
+   }
+ }
+ 
++internal fun applyRectHint(activity: Activity, rectHint: Rect) {
++  PiPParamsState.rectHint = rectHint
++  pushPiPParams(activity)
++}
++
++internal fun applyAspectRatio(activity: Activity, aspectRatio: android.util.Rational) {
++  PiPParamsState.aspectRatio = aspectRatio
++  pushPiPParams(activity)
++}
++
+ // We can't check if AndroidManifest.xml is configured properly, so we have to handle the exceptions ourselves to prevent crashes
+ internal fun runWithPiPMisconfigurationSoftHandling(shouldThrow: Boolean = false, block: () -> Any?) {
+   try {
+@@ -55,9 +79,6 @@ internal fun runWithPiPMisconfigurationSoftHandling(shouldThrow: Boolean = false
+ }
+ 
+ internal fun applyAutoEnterPiP(activity: Activity, autoEnterPiP: Boolean) {
+-  if (Build.VERSION.SDK_INT >= 31 && isPictureInPictureSupported(activity)) {
+-    runWithPiPMisconfigurationSoftHandling {
+-      activity.setPictureInPictureParams(PictureInPictureParams.Builder().setAutoEnterEnabled(autoEnterPiP).build())
+-    }
+-  }
++  PiPParamsState.autoEnter = autoEnterPiP
++  pushPiPParams(activity)
+ }
