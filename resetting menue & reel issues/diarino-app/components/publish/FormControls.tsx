@@ -1,4 +1,5 @@
 import { View, Text, TextInput, Pressable, StyleSheet, TextInputProps } from "react-native";
+import { ChipLabel } from "../shared/ChipLabel";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 
@@ -48,7 +49,7 @@ export function ChipRow<T extends string>({
     <View style={styles.chipRow}>
       {options.map((opt) => (
         <Pressable key={opt} style={value === opt ? styles.chipActive : styles.chip} onPress={() => onChange(opt)}>
-          <Text style={value === opt ? styles.chipActiveText : styles.chipText}>{t(labels?.[opt] ?? opt)}</Text>
+          <ChipLabel text={t(labels?.[opt] ?? opt)} active={value === opt} textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
         </Pressable>
       ))}
     </View>
@@ -65,7 +66,7 @@ export function MultiChipRow({
     <View style={styles.chipRow}>
       {options.map((opt) => (
         <Pressable key={opt.key} style={values.has(opt.key) ? styles.chipActive : styles.chip} onPress={() => onToggle(opt.key)}>
-          <Text style={values.has(opt.key) ? styles.chipActiveText : styles.chipText}>{t(opt.label)}</Text>
+          <ChipLabel text={t(opt.label)} active={values.has(opt.key)} textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
         </Pressable>
       ))}
     </View>
@@ -93,9 +94,9 @@ function createStyles(themeColors: ThemeColors) {
     input: { backgroundColor: themeColors.surface, borderWidth: 1, borderColor: themeColors.border, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, fontSize: 13.5, color: themeColors.text },
     inputError: { borderColor: "#ef4444" },
     chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-    chip: { backgroundColor: themeColors.surface, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },
+    chip: { backgroundColor: themeColors.surface, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 12 },
     chipText: { fontSize: 12, fontWeight: "800", color: themeColors.textMuted },
-    chipActive: { backgroundColor: "#22A652", borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },
+    chipActive: { backgroundColor: "#22A652", borderRadius: 999, paddingVertical: 8, paddingHorizontal: 12 },
     chipActiveText: { fontSize: 12, fontWeight: "800", color: "white" },
     helpBox: { backgroundColor: themeColors.isDark ? "rgba(34,166,82,0.15)" : "#ECFDF5", borderRadius: 12, padding: 12, marginBottom: 4 },
     helpTitle: { fontSize: 12.5, fontWeight: "900", color: themeColors.isDark ? "#6EE7B7" : "#065F46", marginBottom: 4 },

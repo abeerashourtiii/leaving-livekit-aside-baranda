@@ -10,11 +10,8 @@
 // in prod, silent nothing — the user taps a button and nothing visibly
 // happens, with zero feedback that anything went wrong.
 //
-// One exception on purpose: components/account/ShareProfileModal.tsx
-// already has its own, more specific handling per link type (open-or-
-// copy-to-clipboard fallbacks tailored to sharing UX) — that's better
-// than this generic helper for its use case, so it isn't switched to
-// use this and shouldn't be.
+// ملاحظة: مشاركة البروفايل (الإعدادات) بتستخدم lib/shareLinks.ts (شيت المشاركة
+// الأصلي للنظام) مش openURL.
 import { Linking } from "react-native";
 import { showToast } from "../components/shared/Toast";
 

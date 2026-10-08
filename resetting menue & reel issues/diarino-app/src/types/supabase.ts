@@ -433,6 +433,24 @@ export type Database = {
         }
         Relationships: []
       }
+      seller_notification_subscriptions: {
+        Row: {
+          created_at: string
+          seller_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          seller_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          seller_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       follows: {
         Row: {
           created_at: string

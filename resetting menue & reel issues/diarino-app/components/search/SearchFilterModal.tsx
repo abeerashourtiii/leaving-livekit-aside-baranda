@@ -7,6 +7,7 @@ import { RegionAutocompleteField } from "./RegionAutocompleteField";
 import { useProvinceSuggestions, useRecordProvinceSearchAttempt } from "../../lib/hooks/useKnownProvinces";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
+import { ChipLabel } from "../shared/ChipLabel";
 
 // ↔ modal-search-filter / state.searchFilters / renderSfProvinceChips() /
 // renderSfRegionChips() in app-viewer.html.
@@ -138,7 +139,7 @@ export function SearchFilterModal({ visible, value, onApply, onClose }: Props) {
       </Animated.View>
       <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]} {...panResponder.panHandlers}>
         <View style={styles.dragHandle} />
-        <ScrollView showsVerticalScrollIndicator={false} onScroll={handleScroll} scrollEventThrottle={16}>
+        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={handleScroll} scrollEventThrottle={16}>
           <Text style={styles.section}>{t("الغرض")}</Text>
           <View style={styles.chipsRow}>
             {(["all", "sale", "rent"] as const).map((p) => (
@@ -147,9 +148,12 @@ export function SearchFilterModal({ visible, value, onApply, onClose }: Props) {
                 style={draft.purpose === p ? styles.chipActive : styles.chip}
                 onPress={() => setDraft((d) => ({ ...d, purpose: p }))}
               >
-                <Text style={draft.purpose === p ? styles.chipActiveText : styles.chipText}>
-                  {p === "all" ? t("الكل") : p === "sale" ? t("بيع") : t("إيجار")}
-                </Text>
+                <ChipLabel
+                  text={p === "all" ? t("الكل") : p === "sale" ? t("بيع") : t("إيجار")}
+                  active={draft.purpose === p}
+                  textStyle={styles.chipText}
+                  activeTextStyle={styles.chipActiveText}
+                />
               </Pressable>
             ))}
           </View>
@@ -162,7 +166,7 @@ export function SearchFilterModal({ visible, value, onApply, onClose }: Props) {
                 style={draft.type === ty ? styles.chipActive : styles.chip}
                 onPress={() => setDraft((d) => ({ ...d, type: ty }))}
               >
-                <Text style={draft.type === ty ? styles.chipActiveText : styles.chipText}>{ty === "all" ? t("الكل") : t(ty)}</Text>
+                <ChipLabel text={ty === "all" ? t("الكل") : t(ty)} active={draft.type === ty} textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
               </Pressable>
             ))}
           </View>
@@ -265,7 +269,7 @@ export function SearchFilterModal({ visible, value, onApply, onClose }: Props) {
                 style={draft.minRooms === n ? styles.chipActive : styles.chip}
                 onPress={() => setDraft((d) => ({ ...d, minRooms: n }))}
               >
-                <Text style={draft.minRooms === n ? styles.chipActiveText : styles.chipText}>{n === 0 ? t("أي عدد") : `${n}+`}</Text>
+                <ChipLabel text={n === 0 ? t("أي عدد") : `${n}+`} active={draft.minRooms === n} textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
               </Pressable>
             ))}
           </View>

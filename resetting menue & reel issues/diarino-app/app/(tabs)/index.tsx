@@ -20,6 +20,8 @@ import { ReelOptionsSheet } from "../../components/reel/ReelOptionsSheet";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { Property } from "../../lib/types";
 import { useReelHeight } from "../../lib/uiConstants";
+import { reelPagingProps } from "../../lib/reelPaging";
+import { SnapCell } from "../../components/reel/SnapCell";
 import { isPiPActive, usePiPActive } from "../../lib/pipState";
 import { useReelPreferences } from "../../lib/hooks/useReelPreferences";
 import { prefetchReelPosters } from "../../lib/reelPrefetch";
@@ -252,6 +254,7 @@ export default function ReelsScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<Property>) => (
+      <SnapCell height={reelHeight}>
       <ReelCard
         property={item}
         index={index}
@@ -273,6 +276,7 @@ export default function ReelsScreen() {
         onReport={handleReport}
         onFinished={handleReelFinished}
       />
+      </SnapCell>
     ),
     [
       // ↔ إصلاح "الريل مش بيقف لما أسيب الصفحة": isFocused كان بيتقرا جوه
@@ -282,7 +286,7 @@ export default function ReelsScreen() {
       // الانتقال للبحث/القائمة/الطلبات/المقارنات. دلوقتي لما isFocused يتغيّر
       // الدالة بتتجدد (+ extraData تحت) فالكارت النشط بياخد isActive=false
       // فيقف، وأول ما ترجع بياخد true فيكمّل من نفس النقطة.
-      isFocused,
+      isFocused, reelHeight,
       activeIndex, detailsOpenId, followedIds, favoriteProperties, likedIds, compareIdSet,
       handleCloseDetails, handleOpenDetails, handleOpenSeller, handleToggleFollow,
       handleToggleFavorite, handleToggleLike, handleToggleCompare, handleShare, handleReport,
@@ -299,15 +303,14 @@ export default function ReelsScreen() {
         renderItem={renderItem}
         // ↔ extraData: يضمن إعادة رسم الكروت لما حالة التركيز (isFocused) تتغيّر
         extraData={isFocused}
-        pagingEnabled
+        // ↔ التنقل ريل بريل من غير تخطّى (lib/reelPaging.ts): snapToInterval +
+        // disableIntervalMomentum على الموبايل، وCSS scroll-snap لكل خلية على الويب.
+        {...reelPagingProps(reelHeight)}
         // ↔ #3: لما لوحة التفاصيل فاتحة، بنقفل سحب الريلز (زي قفل التمرير
         // فى شاشة الريلز بيوتيوب لما تفتح الكومنتات) بدل ما نسيب المستخدم
         // يسحب لريل تانى واللوحة لسه فاتحة على ريل مختلف.
         scrollEnabled={!detailsOpenId}
         showsVerticalScrollIndicator={false}
-        snapToInterval={reelHeight}
-        snapToAlignment="start"
-        decelerationRate="fast"
         getItemLayout={(_, index) => ({ length: reelHeight, offset: reelHeight * index, index })}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}

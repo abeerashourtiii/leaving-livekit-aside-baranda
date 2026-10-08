@@ -389,8 +389,9 @@ To re-enable: Admin panel → "الميزات العامة للمنصة" → tog
 - **Going live is restricted to non-anonymous accounts**
   (`20260825000000_profile_privacy_rls.sql`'s `lives` INSERT policy adds
   `coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) = false`).
-  Supabase anonymous ("guest") sessions can browse, publish listings,
-  chat, and watch live broadcasts, but can't start one — broadcasting
+  Supabase anonymous ("guest") sessions can browse, chat, and watch live
+  broadcasts, but can't publish listings or requests (`20261007000000_block_guest_publish.sql`;
+  UI: `lib/guestGate.ts` + `app/publish/_layout.tsx`) and can't start a live broadcast — broadcasting
   video of yourself is a real moderation/legal liability, and an
   anonymous account isn't traceable the way a Google-authenticated one
   is. `app/(tabs)/menu.tsx`, `app/(tabs)/account.tsx`, and

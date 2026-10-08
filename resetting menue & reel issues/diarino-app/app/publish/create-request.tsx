@@ -160,7 +160,7 @@ export default function CreateRequestScreen() {
         <View style={{ width: 34 }} />
       </View>
 
-      <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 16, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
         <HelpBox title="كيف تعمل صفحة الطلبات؟">
           اكتب وصف ما تبحث عنه، وسيتواصل معك البائعون بعروضهم عبر الشات.
         </HelpBox>

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 
 // ↔ حالة "التطبيق فى وضع الصورة العائمة (PiP) دلوقتي" — مخزن مشترك صغير.
 // بتتحدّث من أحداث onPictureInPictureStart/Stop بتاعة VideoView (ReelVideoPlayer.tsx).
@@ -16,6 +16,17 @@ export function setPiPActive(next: boolean) {
   if (active === next) return;
   active = next;
   listeners.forEach((l) => l());
+}
+
+// ↔ هل التطبيق فى الواجهة الآن؟ بنستخدمها بعد انتهاء PiP للتفرقة بين حالتين:
+//   • المستخدم ضغط «توسيع» (رجوع للتطبيق) ← التطبيق بيبقى فى الواجهة ← الريل يكمّل.
+//   • المستخدم ضغط «إغلاق ✕» على النافذة العائمة ← التطبيق بيفضل فى الخلفية ← الريل لازم
+//     يقف بصوته (زى يوتيوب). الويب: بنقرا visibilityState بدل AppState.
+export function isAppForeground(): boolean {
+  if (Platform.OS === "web") {
+    return typeof document === "undefined" || document.visibilityState === "visible";
+  }
+  return AppState.currentState === "active";
 }
 
 export function isPiPActive() {

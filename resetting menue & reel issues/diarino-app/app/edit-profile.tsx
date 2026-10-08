@@ -19,6 +19,7 @@ import { CountryPickerModal } from "../components/shared/CountryPickerModal";
 import { COUNTRIES } from "../lib/countries";
 import { logAndGetSafeMessage } from "../lib/errors";
 import { signOut } from "../lib/hooks/useAuth";
+import { showToast } from "../components/shared/Toast";
 
 export default function EditProfileScreen() {
   const { t, language } = useLanguage();
@@ -134,7 +135,7 @@ export default function EditProfileScreen() {
       setAvatarUri(uploadResult.url);
       await update.mutateAsync({ avatarUrl: uploadResult.url });
     } catch {
-      Alert.alert(t("تعذر رفع الصورة"), t("حاول مرة أخرى."));
+      showToast(`${t("تعذر رفع الصورة")} — ${t("حاول مرة أخرى.")}`);
     }
   }
 
@@ -191,7 +192,7 @@ export default function EditProfileScreen() {
       router.back();
     } catch (e: unknown) {
       const msg = logAndGetSafeMessage("EditProfile.save", e, t("تعذر حفظ البيانات، تحقق من تسجيل الدخول وحاول مرة أخرى"));
-      Alert.alert(t("خطأ"), msg);
+      showToast(msg);
     } finally {
       setSaving(false);
     }
@@ -214,7 +215,7 @@ export default function EditProfileScreen() {
       {isLoading && !hydrated ? (
         <View style={styles.loadingWrap}><ActivityIndicator color="#22A652" /></View>
       ) : (
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <Pressable style={styles.avatarWrap} onPress={pickAvatar}>
             {avatarUri ? (
               <Image source={{ uri: cldOptimized(avatarUri, "w_300,h_300,c_fill,q_auto,f_auto") }} style={StyleSheet.absoluteFill} contentFit="cover" />

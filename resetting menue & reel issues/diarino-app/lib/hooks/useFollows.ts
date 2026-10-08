@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../supabase";
 import { useCurrentUser } from "./useCurrentUser";
+import { showToast } from "../../components/shared/Toast";
 
 // ↔ replaces two independent, restart-losing local states that were
 // never synced with each other: app/(tabs)/index.tsx's `followedSellers`
@@ -14,12 +15,17 @@ async function fetchFollowedIds(userId: string): Promise<Set<string>> {
   return new Set(((data ?? []) as { followee_id: string }[]).map((r) => r.followee_id));
 }
 
-// ↔ powers the 🔔 bell on the seller page — which sellers the current
-// user has notifications turned on for, out of the ones they follow.
+// ↔ powers the 🔔 bell (seller page + "الذين تتابعهم" list): which sellers the current user turned new-listing
+// notifications on for. It is a SEPARATE table from `follows` (20261005000000_seller_notification_subscriptions.sql):
+// the bell works with or without following, and following never touches it.
 async function fetchNotifyIds(userId: string): Promise<Set<string>> {
-  const { data, error } = await supabase.from("follows").select("followee_id").eq("follower_id", userId).eq("notify", true);
-  if (error) throw error;
-  return new Set(((data ?? []) as { followee_id: string }[]).map((r) => r.followee_id));
+  const { data, error } = await supabase.from("seller_notification_subscriptions").select("seller_id").eq("user_id", userId);
+  if (error) {
+    // الجدول لسه مش موجود (الـ migration ما اتطبّقتش) — الجرس يبان مطفى بدل ما الصفحة تقع.
+    if ((error as { code?: string }).code === "42P01" || /seller_notification_subscriptions/.test(error.message ?? "")) return new Set<string>();
+    throw error;
+  }
+  return new Set(((data ?? []) as { seller_id: string }[]).map((r) => r.seller_id));
 }
 
 // ↔ powers the "المتابعون"/"الذين تتابعهم" lists in the settings menu.
@@ -102,25 +108,39 @@ export function useFollows() {
       }
     },
     onSuccess: () => {
+      // ↔ المتابعة مالهاش علاقة بالجرس: منحدّثش notifyQueryKey هنا.
       qc.invalidateQueries({ queryKey });
-      qc.invalidateQueries({ queryKey: notifyQueryKey });
     },
   });
 
-  // ↔ the 🔔 bell — turning it on also follows the seller if not already
-  // following (the `notify` preference lives on the follows row itself,
-  // so there's nothing to turn notifications on FOR without one).
+  // ↔ the 🔔 bell — مستقل عن المتابعة: بيضيف/يشيل صف فى seller_notification_subscriptions بس (مفيش upsert
+  // على follows). تحديث متفائل (الجرس بيتغيّر فورًا) مع رجوع للحالة السابقة لو فشل الحفظ.
   const toggleNotify = useMutation({
     mutationFn: async (sellerId: string) => {
       if (!user || user.id === sellerId) return;
-      const currentlyNotifying = notifyQuery.data?.has(sellerId) ?? false;
-      const { error } = await supabase
-        .from("follows")
-        .upsert({ follower_id: user.id, followee_id: sellerId, notify: !currentlyNotifying }, { onConflict: "follower_id,followee_id" });
-      if (error) throw error;
+      const currentlyNotifying = qc.getQueryData<Set<string>>(notifyQueryKey)?.has(sellerId) ?? false;
+      if (currentlyNotifying) {
+        const { error } = await supabase.from("seller_notification_subscriptions").delete().eq("user_id", user.id).eq("seller_id", sellerId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("seller_notification_subscriptions").upsert({ user_id: user.id, seller_id: sellerId }, { onConflict: "user_id,seller_id" });
+        if (error) throw error;
+      }
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey });
+    onMutate: async (sellerId: string) => {
+      await qc.cancelQueries({ queryKey: notifyQueryKey });
+      const previous = qc.getQueryData<Set<string>>(notifyQueryKey);
+      const next = new Set(previous ?? []);
+      if (next.has(sellerId)) next.delete(sellerId);
+      else next.add(sellerId);
+      qc.setQueryData(notifyQueryKey, next);
+      return { previous };
+    },
+    onError: (_err, _sellerId, ctx) => {
+      if (ctx?.previous) qc.setQueryData(notifyQueryKey, ctx.previous);
+      showToast("تعذر حفظ إعداد الإشعارات، حاول مرة أخرى");
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: notifyQueryKey });
     },
   });

@@ -6,6 +6,9 @@ import { Property, fmtPrice } from "../../lib/types";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 import { PropertyLocationMap } from "./PropertyLocationMap";
+import { Image } from "expo-image";
+import { cldThumbnail } from "../../lib/cloudinary";
+import { formatLocationLine } from "../../lib/formatLocation";
 
 // ↔ استخرجت من app/property/[id].tsx الأصلية عشان تتستخدم مرتين: فى
 // الصفحة الكاملة (نفس مكانها زي ما كانت)، وفى لوحة التفاصيل المصغّرة
@@ -32,7 +35,7 @@ export function PropertyDetailsContent({ property }: { property: Property }) {
       </View>
 
       <Text style={styles.title}>{t(property.title)}</Text>
-      <Text style={styles.location}>📍 {t(property.location)}{comma}{t(property.province)}</Text>
+      <Text style={styles.location}>📍 {formatLocationLine(property.province, property.location, t, comma)}</Text>
       {/* ↔ الإنجليزية: السعر بالكامل بحروف لاتينية (EGP / month) ومحاذى لليسار صراحةً —
           قبل كده "ج.م" العربي كان بيخلّي اتجاه السطر RTL فالسعر يظهر يمين. */}
       <Text style={[styles.price, isEn && styles.priceEn]}>
@@ -102,7 +105,13 @@ export function PropertyDetailsContent({ property }: { property: Property }) {
 
       <Link href={`/seller/${property.seller.id}`} asChild>
         <Pressable style={styles.sellerCard}>
-          <View style={styles.sellerAvatar}><Text style={styles.sellerAvatarText}>{property.seller.initial}</Text></View>
+          <View style={styles.sellerAvatar}>
+            {property.seller.avatarUrl ? (
+              <Image source={{ uri: cldThumbnail(property.seller.avatarUrl) }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={150} />
+            ) : (
+              <Text style={styles.sellerAvatarText}>{property.seller.initial}</Text>
+            )}
+          </View>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
               <Text style={styles.sellerName}>{t(property.seller.name)}</Text>
@@ -204,7 +213,7 @@ function createStyles(themeColors: ThemeColors) {
     emptyTabText: { fontSize: 12.5, color: themeColors.textSubtle, textAlign: "center", paddingVertical: 16 },
     description: { fontSize: 13, color: themeColors.textMuted, lineHeight: 21 },
     sellerCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: themeColors.surface, borderRadius: 14, padding: 14 },
-    sellerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center" },
+    sellerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center", overflow: "hidden" },
     sellerAvatarText: { color: "white", fontWeight: "900", fontSize: 17 },
     sellerName: { fontSize: 13.5, fontWeight: "900", color: themeColors.text },
     sellerMeta: { fontSize: 11, color: themeColors.textSubtle, marginTop: 2 },

@@ -7,7 +7,7 @@ import { cldImageCandidates } from "../../lib/cloudinary";
 // بنجرّب الرابط التالى بدل ما المكان يفضل فاضى/أسود، وآخر حاجة بنعرض fallback (ومعاه onAllFailed).
 // الترتيب فى cldImageCandidates (lib/cloudinary.ts).
 export function CascadeImage({
-  url, width = 1200, style, contentFit = "cover", transition = 200, fallback, onAllFailed,
+  url, width = 1200, style, contentFit = "cover", transition = 200, fallback, onAllFailed, onLoad,
 }: {
   url: string | null | undefined;
   width?: number;
@@ -16,6 +16,7 @@ export function CascadeImage({
   transition?: number;
   fallback?: ReactNode;
   onAllFailed?: () => void;
+  onLoad?: () => void;
 }) {
   const candidates = useMemo(() => cldImageCandidates(url, width), [url, width]);
   const [attempt, setAttempt] = useState(0);
@@ -32,6 +33,9 @@ export function CascadeImage({
       style={style}
       contentFit={contentFit}
       transition={transition}
+      cachePolicy="memory-disk"
+      priority="high"
+      onLoad={() => onLoad?.()}
       onError={() => {
         if (__DEV__) console.warn("[CascadeImage] failed, trying next source:", candidates[attempt]);
         setAttempt((a) => a + 1);

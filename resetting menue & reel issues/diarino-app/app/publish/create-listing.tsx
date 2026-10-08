@@ -15,7 +15,7 @@ import { SocialShareSection } from "../../components/publish/SocialShareSection"
 import { PhoneInput, PhoneInputValue } from "../../components/shared/PhoneInput";
 import { SocialPlatform } from "../../lib/hooks/useSocialShareLinks";
 import { MediaItem, Purpose } from "../../lib/types";
-import { usePropertyById, useCreateProperty, useUpdateProperty } from "../../lib/hooks/useProperties";
+import { usePropertyById, useCreateProperty, useUpdateProperty, useMyProperties } from "../../lib/hooks/useProperties";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { supabase } from "../../lib/supabase";
@@ -57,7 +57,12 @@ export default function CreateListingScreen() {
   const { user } = useCurrentUser();
   const { t } = useLanguage();
   const { editId, draftId } = useLocalSearchParams<{ editId?: string; draftId?: string }>();
-  const editingAd = usePropertyById(editId);
+  // ↔ الإعلان المراد تعديله بييجى من «إعلاناتي» (useMyProperties) الأول — قبل كده كان
+  // من قائمة عامة محدودة (300 إعلان) فإعلان قديم/غير معتمد ممكن ما يلاقيهوش
+  // وشاشة التعديل تفتح فاضية.
+  const { data: myAdsForEdit } = useMyProperties(editId ? user?.id : undefined);
+  const editingFallback = usePropertyById(editId);
+  const editingAd = (editId ? myAdsForEdit?.find((p) => p.id === editId) : undefined) ?? editingFallback;
   const { data: draft } = useDraftById(draftId);
   const { save: saveDraft, remove: removeDraft } = useDraftMutations();
   const createProperty = useCreateProperty();
@@ -415,7 +420,9 @@ export default function CreateListingScreen() {
 
       router.replace("/(tabs)/account?tab=ads");
     } catch (err) {
-      Alert.alert(t("تعذر نشر الإعلان"), t("حاول مرة أخرى."));
+      console.warn("Publish listing failed:", err);
+      // Alert.alert مبيظهرش على الويب — Toast بيشتغل على كل المنصات.
+      showToast(`${t("تعذر نشر الإعلان")} — ${t("حاول مرة أخرى.")}`);
     } finally {
       releaseKeepAwake();
       clearCompressedVideoCache();
@@ -455,7 +462,7 @@ export default function CreateListingScreen() {
         <View style={{ width: 34 }} />
       </View>
 
-      <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 16, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
         <HelpBox title="🎥 وسائط الإعلان">
           الفيديو مطلوب لعرض إعلانك في الريلز. يمكنك إضافة صورة واحدة لتكون الواجهة في صفحة البحث.
         </HelpBox>

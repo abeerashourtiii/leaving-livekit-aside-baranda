@@ -12,7 +12,9 @@ import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "../lib/queryClient";
-import { consumeIntentionalSignOut } from "../lib/hooks/useAuth";
+import { completeOAuthCallback, consumeIntentionalSignOut } from "../lib/hooks/useAuth";
+import * as Linking from "expo-linking";
+import { Platform } from "react-native";
 import { getAuthSnapshot, subscribeAuthState } from "../lib/hooks/useCurrentUser";
 import { applyPersistedRTLAtStartup } from "../lib/hooks/useLanguage";
 import { usePushNotifications } from "../lib/hooks/usePushNotifications";
@@ -32,6 +34,23 @@ export default function RootLayout() {
   // الأصلي الأخضر مباشرة، وبعدين بيختفي ويظهر التطبيق (راجع LaunchVideoSplash.tsx).
   const [showLaunch, setShowLaunch] = useState(true);
   usePushNotifications();
+
+  // ↔ رابط تفعيل البريد (أو أى رابط auth) على أندرويد/آيفون/APK: الرابط بيفتح التطبيق
+  // على <scheme>://auth-callback#access_token=... — بنكمّل الجلسة من الرابط ده فى أى حالة
+  // (التطبيق مقفول: getInitialURL، أو شغّال فى الخلفية: حدث url) فالمستخدم يدخل تلقائيًا
+  // بعد التفعيل. completeOAuthCallback بيتجاهل نفس الرابط لو اتنفذ قبل كده (جوجل مثلًا).
+  // الويب بتتعامل معاه شاشة auth-callback نفسها من window.location.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    const handle = (url: string | null) => {
+      if (url && url.includes("auth-callback") && /access_token=|[?&]code=/.test(url)) {
+        void completeOAuthCallback(url);
+      }
+    };
+    void Linking.getInitialURL().then(handle).catch(() => {});
+    const sub = Linking.addEventListener("url", ({ url }) => handle(url));
+    return () => sub.remove();
+  }, []);
   // ↔ بند 5+6 (القائمة مش بتتحمّل / لوحة الأدمن مش بتظهر إلا بعد إعادة
   // التشغيل): السبب الجذري المشترك — queries زي useActiveMenuItems/
   // useActiveAdBanners/useActiveLives (وأي query تاني مقفول بسياسة RLS

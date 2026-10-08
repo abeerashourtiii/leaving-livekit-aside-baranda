@@ -6,8 +6,7 @@ import { usePaginatedProperties, usePropertiesInRadius, usePropertiesInBounds, P
 import { useDebouncedValue } from "../../lib/hooks/useDebouncedValue";
 import { useCompareSelection } from "../../lib/hooks/useCompareSelection";
 import { showToast } from "../../components/shared/Toast";
-import { fmtPrice, Property } from "../../lib/types";
-import { ReelBackground } from "../../components/reel/ReelBackground";
+import { Property } from "../../lib/types";
 import { PageTopBar } from "../../components/shared/PageTopBar";
 import { SearchFilterModal, SearchFilters, DEFAULT_SEARCH_FILTERS } from "../../components/search/SearchFilterModal";
 import { SaveAlertModal } from "../../components/search/SaveAlertModal";
@@ -29,8 +28,10 @@ import { usePropertiesByIds } from "../../lib/hooks/useProperties";
 import { useActiveAdBanners } from "../../lib/hooks/useAdBanners";
 import { AdBannerCarousel } from "../../components/menu/AdBannerCarousel";
 import { SponsoredAdReelModal } from "../../components/search/SponsoredAdReelModal";
-import { cldThumbnail, cardThumbnailUrl } from "../../lib/cloudinary";
+import { cldThumbnail } from "../../lib/cloudinary";
 import { Image } from "expo-image";
+import { padToEvenColumns } from "../../lib/gridPadding";
+import { AdGridCard } from "../../components/property/AdGridCard";
 
 type SearchResultCardProps = {
   item: Property;
@@ -41,21 +42,14 @@ type SearchResultCardProps = {
 };
 
 const SearchResultCard = memo(function SearchResultCard({ item, index, isComparing, onOpenDetails, onToggleCompare }: SearchResultCardProps) {
-  const { t } = useLanguage();
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
-  const thumbnailUrl = cardThumbnailUrl(item);
   return (
-    <Pressable style={styles.card} onPress={() => onOpenDetails(item.id)}>
-      <View style={styles.cardMedia}>
-        {thumbnailUrl ? (
-          <Image source={{ uri: thumbnailUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={150} />
-        ) : (
-          <ReelBackground index={index} type={item.type} />
-        )}
-        <View style={[styles.purposeBadge, { backgroundColor: item.purpose === "sale" ? "#22A652" : "#F4673F" }]}>
-          <Text style={styles.purposeBadgeText}>{item.purpose === "sale" ? t("بيع") : t("إيجار")}</Text>
-        </View>
+    <AdGridCard
+      item={item}
+      index={index}
+      onPress={() => onOpenDetails(item.id)}
+      topStart={
         <Pressable
           style={[styles.compareBadge, isComparing && styles.compareBadgeActive]}
           onPress={(e) => {
@@ -69,17 +63,8 @@ const SearchResultCard = memo(function SearchResultCard({ item, index, isCompari
             <Path d="M8 6V4a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
           </Svg>
         </Pressable>
-      </View>
-      <View style={styles.cardInfo}>
-        <Text style={styles.cardType}>{t(item.type)}</Text>
-        <Text style={styles.cardPrice}>{fmtPrice(item.price)} {t("ج.م")} {item.purpose === "rent" ? t("/ شهر") : ""}</Text>
-        <Text style={styles.cardLocation} numberOfLines={1}>📍 {t(item.province)} · {t(item.location)}</Text>
-        <View style={styles.cardMetaRow}>
-          {!!item.rooms && <Text style={styles.cardMeta}>🛏 {item.rooms}</Text>}
-          <Text style={styles.cardMeta}>📐 {item.area} {t("م²")}</Text>
-        </View>
-      </View>
-    </Pressable>
+      }
+    />
   );
 });
 
@@ -204,8 +189,13 @@ export default function SearchScreen() {
     },
     [compareSelection, t]
   );
+  // ↔ الكارت الأخير المنفرد فى الصف بقى بنص الصف بدل الصف كله (lib/gridPadding.ts).
+  const paddedResults = useMemo(() => padToEvenColumns(results), [results]);
+
   const renderItem = useCallback(
-    ({ item, index }: { item: Property; index: number }) => (
+    ({ item, index }: { item: Property | null; index: number }) => item === null ? (
+      <View style={{ flex: 1 }} />
+    ) : (
       <SearchResultCard
         item={item}
         index={index}
@@ -339,8 +329,8 @@ export default function SearchScreen() {
         />
       ) : (
         <FlatList
-          data={results}
-          keyExtractor={(p) => p.id}
+          data={paddedResults}
+          keyExtractor={(p, i) => (p ? p.id : `filler-${i}`)}
           numColumns={2}
           columnWrapperStyle={{ gap: 10, paddingHorizontal: 14 }}
           contentContainerStyle={{ gap: 10, paddingTop: 10, paddingBottom: 110 }}
@@ -490,7 +480,7 @@ function createStyles(themeColors: ThemeColors) {
     cardMedia: { height: 120, position: "relative" },
     purposeBadge: { position: "absolute", top: 8, right: 8, borderRadius: 999, paddingVertical: 3, paddingHorizontal: 8 },
     compareBadge: {
-      position: "absolute", top: 8, left: 8, width: 26, height: 26, borderRadius: 8,
+      width: 26, height: 26, borderRadius: 8,
       backgroundColor: "rgba(255,255,255,0.9)", alignItems: "center", justifyContent: "center",
     },
     compareBadgeActive: { backgroundColor: "#22A652" },

@@ -1,13 +1,15 @@
 import { memo, useCallback, useMemo, useState } from "react";
-import { router, useLocalSearchParams, Link } from "expo-router";
-import { View, Text, ScrollView, Pressable, StyleSheet, FlatList, Alert } from "react-native";
+import { router, useLocalSearchParams } from "expo-router";
+import { View, Text, ScrollView, Pressable, StyleSheet, FlatList, Alert, ActivityIndicator } from "react-native";
 import { Image } from "expo-image";
 import Svg, { Path } from "react-native-svg";
-import { useMyProperties } from "../../lib/hooks/useProperties";
+import { MAX_PINNED_PROPERTIES, useMyProperties } from "../../lib/hooks/useProperties";
+import { orderSellerListings } from "../../lib/listingOrder";
+import { padToEvenColumns } from "../../lib/gridPadding";
+import { AdGridCard } from "../../components/property/AdGridCard";
 import { properties as demoProperties } from "../../data/mock-properties";
-import { fmtPrice, Property } from "../../lib/types";
-import { ReelBackground } from "../../components/reel/ReelBackground";
-import { cardThumbnailUrl } from "../../lib/cloudinary";
+import { Property, Seller } from "../../lib/types";
+import { cldThumbnail } from "../../lib/cloudinary";
 import { openOrCreateChat } from "../../lib/hooks/useChatsDB";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useLanguage } from "../../lib/hooks/useLanguage";
@@ -15,7 +17,8 @@ import { useFollows, useFollowerCount } from "../../lib/hooks/useFollows";
 import { usePublicLivesForSeller } from "../../lib/hooks/useMyContent";
 import { useLikes } from "../../lib/hooks/useLikes";
 import { useFavorites } from "../../lib/hooks/useFavorites";
-import { useIsProfilePublic } from "../../lib/hooks/useAccountPrivacy";
+import { useEnsureSession } from "../../lib/hooks/useEnsureSession";
+import { usePublicProfile } from "../../lib/hooks/usePublicProfile";
 import { useFeatureFlag } from "../../lib/hooks/useFeatureFlags";
 import { ActionSheet } from "../../components/shared/ActionSheet";
 import { ReportModal } from "../../components/shared/ReportModal";
@@ -34,48 +37,38 @@ type SellerPropertyCardProps = {
 };
 
 const SellerPropertyCard = memo(function SellerPropertyCard({ item, isLiked, isFavorite, onToggleLike, onToggleFavorite, onReport }: SellerPropertyCardProps) {
-  const { t } = useLanguage();
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
-  const thumbnailUrl = cardThumbnailUrl(item);
   return (
-    <Link href={`/property/${item.id}/reel`} asChild>
-      <Pressable
-        style={styles.card}
-        onLongPress={() => onReport(item)}
-        delayLongPress={500}
-      >
-        <View style={styles.cardMedia}>
-          {thumbnailUrl ? (
-            <Image source={{ uri: thumbnailUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={150} />
-          ) : (
-            <ReelBackground index={0} type={item.type} />
-          )}
-          <View style={styles.cardActions}>
-            <Pressable
-              style={styles.cardActionBtn}
-              onPress={(e) => { e.stopPropagation(); onToggleLike(item.id); }}
-              hitSlop={6}
-            >
-              <Svg width={13} height={13} viewBox="0 0 24 24" fill={isLiked ? "#ef4444" : "none"} stroke={isLiked ? "#ef4444" : "white"} strokeWidth={2}>
-                <Path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.6l-1-1a5.5 5.5 0 00-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 000-7.8z" />
-              </Svg>
-            </Pressable>
-            <Pressable
-              style={styles.cardActionBtn}
-              onPress={(e) => { e.stopPropagation(); onToggleFavorite(item.id); }}
-              hitSlop={6}
-            >
-              <Svg width={13} height={13} viewBox="0 0 24 24" fill={isFavorite ? "#22A652" : "none"} stroke={isFavorite ? "#22A652" : "white"} strokeWidth={2}>
-                <Path d="M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2z" />
-              </Svg>
-            </Pressable>
-          </View>
-        </View>
-        <Text style={styles.cardPrice}>{fmtPrice(item.price)} {t("ج.م")}</Text>
-        <Text style={styles.cardTitle} numberOfLines={1}>{t(item.shortTitle || item.title)}</Text>
-      </Pressable>
-    </Link>
+    <AdGridCard
+      item={item}
+      onPress={() => router.push(`/property/${item.id}/reel?sellerId=${item.seller.id}`)}
+      onLongPress={() => onReport(item)}
+      delayLongPress={500}
+      topStart={
+        <>
+          <Pressable
+            style={styles.cardActionBtn}
+            onPress={(e) => { e.stopPropagation(); onToggleLike(item.id); }}
+            hitSlop={6}
+          >
+            <Svg width={13} height={13} viewBox="0 0 24 24" fill={isLiked ? "#ef4444" : "none"} stroke={isLiked ? "#ef4444" : "white"} strokeWidth={2}>
+              <Path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.6l-1-1a5.5 5.5 0 00-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 000-7.8z" />
+            </Svg>
+          </Pressable>
+          <Pressable
+            style={styles.cardActionBtn}
+            onPress={(e) => { e.stopPropagation(); onToggleFavorite(item.id); }}
+            hitSlop={6}
+          >
+            <Svg width={13} height={13} viewBox="0 0 24 24" fill={isFavorite ? "#22A652" : "none"} stroke={isFavorite ? "#22A652" : "white"} strokeWidth={2}>
+              <Path d="M19 21l-7-4-7 4V5a2 2 0 012-2h10a2 2 0 012 2z" />
+            </Svg>
+          </Pressable>
+        </>
+      }
+      bottomStart={item.pinned ? <View style={styles.cardPinBadge}><Text style={styles.cardPinBadgeText}>📌</Text></View> : undefined}
+    />
   );
 });
 
@@ -92,7 +85,12 @@ export default function SellerProfileScreen() {
   const { data: publicLives } = usePublicLivesForSeller(id, liveFeatureEnabled);
   const { likedIds, toggleLike } = useLikes();
   const { favoriteProperties, toggleFavoriteProperty } = useFavorites();
-  const { data: isProfilePublic } = useIsProfilePublic(id);
+  // ↔ رابط مشاركة البروفايل بيفتح الصفحة دى مباشرة (حتى كأول شاشة بعد تشغيل
+  // التطبيق من الرابط): نضمن وجود جلسة (ضيف لو لزم) قبل أى قراءة محمية بـ RLS.
+  const { ready: sessionReady, failed: sessionFailed } = useEnsureSession();
+  // ↔ الاسم/الصورة/التوثيق/الخصوصية من profiles_public مباشرة، فالصفحة تشتغل
+  // حتى لو صاحب الحساب مالوش إعلانات.
+  const { data: publicProfile, isLoading: profileLoading } = usePublicProfile(id, sessionReady);
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
 
@@ -104,12 +102,37 @@ export default function SellerProfileScreen() {
   // still merged in separately since they're never real DB rows —
   // exactly what useProperties() did before, just without needing every
   // real listing in the whole app to do it.
-  const { data: myListings } = useMyProperties(id);
+  const { data: myListings, isLoading: listingsLoading } = useMyProperties(id);
+  // ↔ المثبّتة (حد أقصى 3، الأحدث تثبيتًا أولًا) بتظهر فى أول صفحة المعلن، وبعدها
+  // باقى الإعلانات بترتيبها الأصلى. أى مثبّتة زيادة عن الحد (بيانات قديمة) بتتعرض
+  // كإعلان عادى من غير شارة.
   const sellerListings = useMemo(
-    () => [...(myListings ?? []), ...demoProperties.filter((p) => p.seller.id === id)],
+    () => orderSellerListings([...(myListings ?? []), ...demoProperties.filter((p) => p.seller.id === id)], MAX_PINNED_PROPERTIES),
     [myListings, id]
   );
-  const seller = sellerListings[0]?.seller;
+  const seller = useMemo<Seller | undefined>(() => {
+    const fromListings = sellerListings[0]?.seller;
+    if (!publicProfile) return fromListings;
+    const name = publicProfile.name || fromListings?.name || "مستخدم باراندا";
+    return {
+      id: publicProfile.id,
+      name,
+      initial: name.charAt(0),
+      verified: publicProfile.verified,
+      listings: sellerListings.length,
+      followers: fromListings?.followers ?? 0,
+      bio: publicProfile.bio?.trim() || fromListings?.bio || "",
+      avatarUrl: publicProfile.avatarUrl,
+      phone: "",
+    };
+  }, [publicProfile, sellerListings]);
+
+  // ↔ لما الصفحة تتفتح من رابط مشاركة (أول شاشة فى التطبيق) مفيش شاشة قبلها
+  // يرجع لها router.back() — نرجّع للرئيسية بدل ما الزر ما يعملش حاجة.
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/(tabs)");
+  }, []);
 
   // ↔ long-press on a recorded-live card below → quick "الإبلاغ عن هذا
   // اللايف" (reason only, no link), same pattern as the reel feed's
@@ -127,8 +150,12 @@ export default function SellerProfileScreen() {
     (item: Property) => setReportSheetProperty({ id: item.id, title: item.shortTitle || item.title }),
     []
   );
+  // ↔ الكارت الأخير المنفرد فى الصف بقى بنص الصف بدل الصف كله (lib/gridPadding.ts).
+  const paddedListings = useMemo(() => padToEvenColumns(sellerListings), [sellerListings]);
   const renderItem = useCallback(
-    ({ item }: { item: Property }) => (
+    ({ item }: { item: Property | null }) => item === null ? (
+      <View style={{ flex: 1 }} />
+    ) : (
       <SellerPropertyCard
         item={item}
         isLiked={likedIds.has(item.id)}
@@ -141,24 +168,43 @@ export default function SellerProfileScreen() {
     [likedIds, favoriteProperties, handleToggleLikeProperty, handleToggleFavoriteProperty, handleReportProperty]
   );
 
-  if (!seller) {
+  if (sessionFailed) {
     return (
       <View style={styles.notFound}>
-        <Text style={styles.notFoundText}>{t("هذا البائع غير متاح")}</Text>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backBtnText}>{t("رجوع")}</Text>
+        <Text style={styles.notFoundText}>{t("سجّل دخولك لعرض هذا الحساب")}</Text>
+        <Pressable style={styles.backBtn} onPress={() => router.replace("/")}>
+          <Text style={styles.backBtnText}>{t("تسجيل الدخول")}</Text>
         </Pressable>
+      </View>
+    );
+  }
+
+  if (!sessionReady || profileLoading || (listingsLoading && !seller)) {
+    return (
+      <View style={styles.notFound}>
+        <ActivityIndicator color="#22A652" />
       </View>
     );
   }
 
   // ↔ "الحساب العام" toggle in the settings menu — hide everything except
   // a plain notice from anyone other than the account's own owner.
-  if (isProfilePublic === false && user?.id !== id) {
+  if (publicProfile && publicProfile.isPublic === false && user?.id !== id) {
     return (
       <View style={styles.notFound}>
         <Text style={styles.notFoundText}>{t("هذا الحساب خاص")}</Text>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}>
+        <Pressable style={styles.backBtn} onPress={goBack}>
+          <Text style={styles.backBtnText}>{t("رجوع")}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (!seller) {
+    return (
+      <View style={styles.notFound}>
+        <Text style={styles.notFoundText}>{t("هذا البائع غير متاح")}</Text>
+        <Pressable style={styles.backBtn} onPress={goBack}>
           <Text style={styles.backBtnText}>{t("رجوع")}</Text>
         </Pressable>
       </View>
@@ -168,7 +214,7 @@ export default function SellerProfileScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable style={styles.closeBtn} onPress={() => router.back()} hitSlop={8}>
+        <Pressable style={styles.closeBtn} onPress={goBack} hitSlop={8}>
           <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={themeColors.textMuted} strokeWidth={2.5}>
             <Path d="M6 6l12 12M18 6L6 18" />
           </Svg>
@@ -176,22 +222,28 @@ export default function SellerProfileScreen() {
       </View>
 
       <FlatList
-        data={sellerListings}
-        keyExtractor={(p) => p.id}
+        data={paddedListings}
+        keyExtractor={(p, i) => (p ? p.id : `filler-${i}`)}
         numColumns={2}
         columnWrapperStyle={{ gap: 10, paddingHorizontal: 14 }}
         contentContainerStyle={{ gap: 10, paddingBottom: 30 }}
         ListHeaderComponent={
           <View style={styles.profileBlock}>
-            <View style={styles.avatar}><Text style={styles.avatarText}>{seller.initial}</Text></View>
+            <View style={styles.avatar}>
+              {publicProfile?.avatarUrl ? (
+                <Image source={{ uri: cldThumbnail(publicProfile.avatarUrl) }} style={styles.avatarImg} contentFit="cover" transition={150} />
+              ) : (
+                <Text style={styles.avatarText}>{seller.initial}</Text>
+              )}
+            </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
               <Text style={styles.name}>{t(seller.name)}</Text>
               {seller.verified && <Text style={{ color: "#22A652", fontSize: 15 }}>✓</Text>}
             </View>
-            <Text style={styles.bio}>{t(seller.bio)}</Text>
+            {!!seller.bio && <Text style={styles.bio}>{seller.bio}</Text>}
 
             <View style={styles.statsRow}>
-              <Stat label="إعلان" value={seller.listings} />
+              <Stat label="إعلان" value={sellerListings.length} />
               <Stat label="متابع" value={followerCount ?? seller.followers} />
             </View>
 
@@ -339,7 +391,8 @@ function createStyles(themeColors: ThemeColors) {
     header: { paddingTop: 50, paddingHorizontal: 14, paddingBottom: 6 },
     closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: themeColors.surface },
     profileBlock: { alignItems: "center", paddingHorizontal: 20, paddingBottom: 16 },
-    avatar: { width: 76, height: 76, borderRadius: 38, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center", marginBottom: 10 },
+    avatar: { width: 76, height: 76, borderRadius: 38, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center", marginBottom: 10, overflow: "hidden" },
+    avatarImg: { width: "100%", height: "100%" },
     avatarText: { color: "white", fontWeight: "900", fontSize: 28 },
     name: { fontSize: 16, fontWeight: "900", color: themeColors.text },
     bio: { fontSize: 12.5, color: themeColors.textSubtle, marginTop: 4, textAlign: "center" },
@@ -367,6 +420,8 @@ function createStyles(themeColors: ThemeColors) {
     liveCardTitle: { fontSize: 11, color: themeColors.textSubtle, marginTop: 4, width: 100 },
     card: { flex: 1, backgroundColor: themeColors.surface, borderRadius: 12, overflow: "hidden", marginBottom: 4 },
     cardMedia: { height: 110, position: "relative" },
+    cardPinBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center" },
+    cardPinBadgeText: { fontSize: 11 },
     cardActions: { position: "absolute", top: 6, left: 6, flexDirection: "row", gap: 6 },
     cardActionBtn: {
       width: 24, height: 24, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.45)",

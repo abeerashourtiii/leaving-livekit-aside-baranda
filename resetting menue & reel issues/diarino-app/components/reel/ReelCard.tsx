@@ -98,6 +98,10 @@ export const ReelCard = memo(function ReelCard({
 
   // ↔ toggleReelPause() — tap top/bottom half of the reel to pause/resume.
   const [paused, setPaused] = useState(false);
+  // ↔ أثناء سحب كرة الـ seek الريل بيتوقف مؤقتًا (سحب سلس)، وعند الإفلات بيستأنف من نقطة الإفلات
+  //   (حتى لو كان المستخدم موقفه قبل كده). holdPaused = الإيقاف الفعلي (يدوي أو أثناء السحب).
+  const [scrubbing, setScrubbing] = useState(false);
+  const holdPaused = paused || scrubbing;
   // ↔ إصلاح باغ #2: حالة الأيقونة اللي بتفلاش عند كل تبديل (تشغيل/إيقاف)
   // — مستقلة عن `paused` نفسها، عشان تفضل تظهر لحظة الضغط حتى لو
   // `paused` اتغيّرت فورًا بعدها.
@@ -140,7 +144,10 @@ export const ReelCard = memo(function ReelCard({
   }
 
   function seekVideo(pct: number) {
+    // ↔ نضبط الموضع ونشغّل فورًا من نقطة الإفلات، وبعدها نشيل حالة الإيقاف.
     videoRef.current?.seekToPct(pct);
+    setPaused(false);
+    setScrubbing(false);
   }
 
   // ---- slideshow state ↔ startSlideshow()/updateSlideshowSeek() ----
@@ -150,7 +157,7 @@ export const ReelCard = memo(function ReelCard({
   const slideTotalMs = images.length * BASE_SLIDE_MS;
 
   useEffect(() => {
-    if (mode !== "slideshow" || images.length < 2 || !isActive || paused) return;
+    if (mode !== "slideshow" || images.length < 2 || !isActive || holdPaused) return;
     const tickMs = 100;
     const interval = BASE_SLIDE_MS / speed;
     const id = setInterval(() => {
@@ -166,13 +173,15 @@ export const ReelCard = memo(function ReelCard({
       });
     }, tickMs);
     return () => clearInterval(id);
-  }, [mode, images.length, isActive, paused, speed, autoAdvance, onFinished]);
+  }, [mode, images.length, isActive, holdPaused, speed, autoAdvance, onFinished]);
 
   function seekSlideshow(pct: number) {
     const total = BASE_SLIDE_MS * images.length;
     const elapsed = pct * total;
     setSlideElapsedMs(elapsed);
     setSlideIdx(Math.min(images.length - 1, Math.floor(elapsed / BASE_SLIDE_MS)));
+    setPaused(false);
+    setScrubbing(false);
   }
 
   // ↔ maybePlayReelMusicFor() — only plays when there's no video (mode
@@ -180,7 +189,7 @@ export const ReelCard = memo(function ReelCard({
   // stops the moment this reel isn't the active/playing one, same as the
   // pause-tied start/stop in the original's toggleReelPause().
   useEffect(() => {
-    const shouldPlay = mode !== "video" && !!property.music && isActive && !paused;
+    const shouldPlay = mode !== "video" && !!property.music && isActive && !holdPaused;
     if (shouldPlay) {
       startReelMusic(property.id, property.music);
       // ↔ #4 (كتم صوت الخلفية): بيحدّث مستوى صوت الموسيقى الشغالة فورًا
@@ -192,7 +201,7 @@ export const ReelCard = memo(function ReelCard({
     return () => {
       stopReelMusic();
     };
-  }, [mode, property.music, property.id, isActive, paused, musicMuted]);
+  }, [mode, property.music, property.id, isActive, holdPaused, musicMuted]);
 
   function togglePause() {
     setPaused((prev) => {
@@ -335,7 +344,7 @@ export const ReelCard = memo(function ReelCard({
                 ref={videoRef}
                 uri={video.url}
                 isActive={isActive}
-                paused={paused}
+                paused={holdPaused}
                 speed={speed}
                 // ↔ #4 (تمرير تلقائي): لما autoAdvance مفعّل، الفيديو مبيلفّش
                 // تانى من نفسه — بيوصل لنهايته فعليًا (playToEnd جوه
@@ -348,6 +357,7 @@ export const ReelCard = memo(function ReelCard({
                 onPosition={onVideoPosition}
                 onFinished={onVideoFinished}
                 onPlayingChange={(playing) => { if (playing) setVideoStarted(true); }}
+                onPiPClosed={() => setPaused(true)}
               />
             )}
             {/* ↔ perf audit fix #1 (محدّث): الكروت خارج النطاق القريب من الريل
@@ -412,18 +422,22 @@ export const ReelCard = memo(function ReelCard({
             <ReelSeekBar
               currentSec={videoPosMs / 1000}
               durationSec={videoDurMs / 1000}
-              isPlaying={isActive && !paused}
+              isPlaying={isActive && !holdPaused}
               onTogglePlay={togglePause}
               onSeek={seekVideo}
+              onScrubStart={() => setScrubbing(true)}
+              onScrubCancel={() => setScrubbing(false)}
             />
           )}
           {mode === "slideshow" && images.length > 1 && (
             <ReelSeekBar
               currentSec={slideElapsedMs / 1000}
               durationSec={slideTotalMs / 1000}
-              isPlaying={isActive && !paused}
+              isPlaying={isActive && !holdPaused}
               onTogglePlay={togglePause}
               onSeek={seekSlideshow}
+              onScrubStart={() => setScrubbing(true)}
+              onScrubCancel={() => setScrubbing(false)}
             />
           )}
 

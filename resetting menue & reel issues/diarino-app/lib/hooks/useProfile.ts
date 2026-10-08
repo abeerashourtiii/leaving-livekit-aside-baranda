@@ -23,6 +23,7 @@ export type Profile = {
   phoneE164: string | null;
   phoneCountryCode: string | null;
   phoneCountryName: string | null;
+  bio: string | null;
 };
 
 type ProfileRow = {
@@ -39,6 +40,7 @@ type ProfileRow = {
   phone_e164: string | null;
   phone_country_code: string | null;
   phone_country_name: string | null;
+  bio: string | null;
 };
 
 function rowToProfile(r: ProfileRow): Profile {
@@ -56,11 +58,12 @@ function rowToProfile(r: ProfileRow): Profile {
     phoneE164: r.phone_e164,
     phoneCountryCode: r.phone_country_code,
     phoneCountryName: r.phone_country_name,
+    bio: r.bio,
   };
 }
 
 const SELECT_COLUMNS =
-  "id, full_name, username, first_name, last_name, avatar_url, birth_date, gender, nationality, residence, phone_e164, phone_country_code, phone_country_name";
+  "id, full_name, username, first_name, last_name, avatar_url, birth_date, gender, nationality, residence, phone_e164, phone_country_code, phone_country_name, bio";
 
 export function useProfile() {
   const { user } = useCurrentUser();
@@ -87,7 +90,7 @@ export function useProfile() {
     mutationFn: async (patch: Partial<{
       fullName: string; username: string; firstName: string; lastName: string; avatarUrl: string;
       birthDate: string; gender: "male" | "female"; nationality: string; residence: string;
-      phoneE164: string; phoneCountryCode: string; phoneCountryName: string;
+      phoneE164: string; phoneCountryCode: string; phoneCountryName: string; bio: string;
     }>) => {
       if (!user?.id) throw new Error("لا يوجد مستخدم مسجّل دخول");
 
@@ -105,7 +108,7 @@ export function useProfile() {
       const row: {
         full_name?: string; username?: string; first_name?: string; last_name?: string; avatar_url?: string;
         birth_date?: string; gender?: string; nationality?: string; residence?: string;
-        phone_e164?: string; phone_country_code?: string; phone_country_name?: string;
+        phone_e164?: string; phone_country_code?: string; phone_country_name?: string; bio?: string;
       } = {};
       if (patch.fullName !== undefined) row.full_name = patch.fullName;
       if (patch.username !== undefined) row.username = patch.username;
@@ -119,6 +122,7 @@ export function useProfile() {
       if (patch.phoneE164 !== undefined) row.phone_e164 = patch.phoneE164;
       if (patch.phoneCountryCode !== undefined) row.phone_country_code = patch.phoneCountryCode;
       if (patch.phoneCountryName !== undefined) row.phone_country_name = patch.phoneCountryName;
+      if (patch.bio !== undefined) row.bio = patch.bio;
 
       const { data, error } = await supabase
         .from("profiles")
@@ -139,8 +143,18 @@ export function useProfile() {
       }
       if (!data) throw new Error("Profile row was not saved");
     },
-    onSuccess: () => {
+    onSuccess: (_data, patch) => {
+      // ↔ الاسم/الصورة/النبذة لازم تظهر فورًا فى كل مكان: نحدّث كاش البروفايل
+      // مباشرة (فنفس الشاشة والإعدادات وحسابي والقائمة تتغيّر لحظيًا)، وبعدها
+      // نعمل invalidate لكل الكاشات اللى بتعرض بيانات البروفايل من مصدر تانى:
+      //   myAvatar    ← دائرة «إدارة الحساب» فى القائمة (قبل كده 60 ثانية كاش)
+      //   publicProfile ← صفحة المعلن (الاسم/الصورة/النبذة)
+      //   properties  ← أفاتار واسم البائع على الريلز وتفاصيل العقار
+      qc.setQueryData<Profile | null>(["profile", user?.id], (old) => (old ? { ...old, ...patch } : old));
       qc.invalidateQueries({ queryKey: ["profile"] });
+      qc.invalidateQueries({ queryKey: ["myAvatar"] });
+      qc.invalidateQueries({ queryKey: ["publicProfile"] });
+      qc.invalidateQueries({ queryKey: ["properties"] });
     },
   });
 

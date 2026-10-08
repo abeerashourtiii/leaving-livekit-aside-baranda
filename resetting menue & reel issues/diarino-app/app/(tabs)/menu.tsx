@@ -19,6 +19,7 @@ import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useFeatureFlag } from "../../lib/hooks/useFeatureFlags";
 import { waLink } from "../../lib/whatsapp";
 import { openExternalUrl } from "../../lib/linking";
+import { redirectGuestToLogin } from "../../lib/guestGate";
 import { useActiveAdBanners } from "../../lib/hooks/useAdBanners";
 import { AdBannerCarousel } from "../../components/menu/AdBannerCarousel";
 import { MenuCard } from "../../components/menu/MenuCard";
@@ -127,6 +128,12 @@ export default function MenuScreen() {
   const themeColors = useThemeColors();
 
   function runAction(item: MenuItem) {
+    // ↔ انشر عقارك / اطلب عقارك للمسجَّلين فقط — الضيف يتحوّل لصفحة التسجيل
+    // برسالة (lib/guestGate.ts). الحماية الأساسية كمان فى app/publish/_layout.tsx.
+    if (item.actionType === "route" && /^\/publish(\/|$)/.test(item.actionValue) && user?.is_anonymous) {
+      void redirectGuestToLogin();
+      return;
+    }
     if (item.actionType === "route" && item.actionValue === "/live/broadcast" && user?.is_anonymous) {
       Alert.alert(t("يجب تسجيل الدخول بحساب Google لبدء بث مباشر"), t("المتابعة كضيف لا تتيح بدء بث مباشر."));
       return;

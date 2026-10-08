@@ -14,7 +14,7 @@ type PropertyRowBase = {
   negotiable: boolean | null; finish_type: string | null; status: string | null; delivery_date: string | null;
   features: string[]; description: string; media: MediaItem[]; cover_image: string | null; music: string | null;
   captions_ar: string | null; captions_en: string | null;
-  pinned: boolean; pinned_at: string | null; likes: number; saves: number; views: number; chats: number;
+  pinned: boolean; pinned_at: string | null; moderation_status?: string | null; likes: number; saves: number; views: number; chats: number;
   created_at: string; share_platforms: string[] | null;
 };
 type PropertyRow = PropertyRowBase & { profiles: ProfileRowPublic | null };
@@ -54,6 +54,7 @@ function rowToProperty(row: PropertyRow): Property {
     captionsEn: row.captions_en,
     pinned: row.pinned,
     pinnedAt: row.pinned_at ? new Date(row.pinned_at).getTime() : undefined,
+    moderationStatus: (row.moderation_status as Property["moderationStatus"]) ?? undefined,
     sharePlatforms: row.share_platforms || [],
     likes: row.likes, saves: row.saves, views: row.views, chats: row.chats,
     createdAt: new Date(row.created_at).getTime(),
@@ -62,6 +63,7 @@ function rowToProperty(row: PropertyRow): Property {
       name: profile?.full_name || "مستخدم باراندا",
       initial: (profile?.full_name || "د").charAt(0),
       verified: profile?.verified || false,
+      avatarUrl: profile?.avatar_url ?? null,
       listings: 0,
       followers: 0,
       // ↔ لا bio ولا phone_e164 فى profiles_public عن قصد (PII، شوف
@@ -305,12 +307,20 @@ export function useSellerContactPhone(propertyId: string | undefined) {
   });
 }
 
+// ↔ أقصى عدد إعلانات مثبّتة لكل معلن (بتظهر أول صفحة المعلن) — مفروض كمان على
+// الخادم بـ trigger (20261007000001_limit_pinned_properties.sql).
+export const MAX_PINNED_PROPERTIES = 3;
+
+// ↔ «إعلاناتي» لازم تعكس الحالة الحقيقية فى كل مرة تتفتح: staleTime 0 +
+// refetchOnMount "always" (قبل كده 10 ثوانى كاش كانت ممكن تخلّى إعلان لسه
+// منشور ما يظهرش لو الشاشة اتفتحت بسرعة).
 export function useMyProperties(sellerId: string | undefined) {
   return useQuery({
     queryKey: ["properties", "bySeller", sellerId],
     queryFn: () => fetchPropertiesBySeller(sellerId!),
     enabled: !!sellerId,
-    staleTime: 10_000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 
@@ -357,8 +367,19 @@ export function useCreateProperty() {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["properties"] });
+    onSuccess: async (data) => {
+      // ↔ الإعلان الجديد بيتحط فى كاش «إعلاناتي» فورًا (قبل ما إعادة الجلب تخلص)
+      // فيظهر مباشرة بعد النشر — وبعدها الجلب الحقيقى من الخادم يصحّح أى فرق.
+      try {
+        const created = rowToProperty({ ...(data as unknown as PropertyRowBase), profiles: null });
+        qc.setQueryData<Property[]>(["properties", "bySeller", created.seller.id], (old) => [
+          created,
+          ...(old ?? []).filter((p) => p.id !== created.id),
+        ]);
+      } catch (err) {
+        console.warn("Failed to seed my-ads cache:", err);
+      }
+      await qc.invalidateQueries({ queryKey: ["properties"] });
     },
   });
 }
@@ -408,8 +429,10 @@ export function useDeleteProperty() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("properties").delete().eq("id", id);
+      // ↔ .select("id") عشان لو RLS منعت الحذف (0 صفوف) ما نعتبرهوش نجح بالغلط.
+      const { data, error } = await supabase.from("properties").delete().eq("id", id).select("id");
       if (error) throw error;
+      if (!data || data.length === 0) throw new Error("delete_not_applied");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["properties"] }),
   });
@@ -419,8 +442,17 @@ export function useTogglePinProperty() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, pinned }: { id: string; pinned: boolean }) => {
-      const { error } = await supabase.from("properties").update({ pinned, pinned_at: pinned ? new Date().toISOString() : null }).eq("id", id);
-      if (error) throw error;
+      const { data, error } = await supabase
+        .from("properties")
+        .update({ pinned, pinned_at: pinned ? new Date().toISOString() : null })
+        .eq("id", id)
+        .select("id");
+      if (error) {
+        // الخادم بيرفض التثبيت الرابع (trigger) برسالة فيها max_pinned.
+        if (/max_pinned/i.test(error.message ?? "")) throw new Error("max_pinned");
+        throw error;
+      }
+      if (!data || data.length === 0) throw new Error("pin_not_applied");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["properties"] }),
   });

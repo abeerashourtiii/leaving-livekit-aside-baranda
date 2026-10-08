@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   View, Text, Pressable, ScrollView, StyleSheet, ActivityIndicator,
@@ -7,7 +7,7 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FormLabel, FormError, FormInput } from "../components/publish/FormControls";
-import { signUpWithEmail, signInWithEmailPassword, resolvePostAuthRoute } from "../lib/hooks/useAuth";
+import { signUpWithEmail, signInWithEmailPassword, resendSignupConfirmation, resolvePostAuthRoute } from "../lib/hooks/useAuth";
 import { getAuthSnapshot } from "../lib/hooks/useCurrentUser";
 import { useThemeColors, ThemeColors } from "../lib/hooks/useThemeColors";
 import { useLanguage } from "../lib/hooks/useLanguage";
@@ -31,12 +31,41 @@ export default function AuthEmailScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [confirmationSent, setConfirmationSent] = useState(false);
+  // ↔ إعادة إرسال رابط التفعيل: زر بمهلة 60 ثانية (Supabase بيحدّ عدد الرسائل) —
+  // بيظهر بعد التسجيل وبعد محاولة دخول بحساب لسه ماتفعّلش.
+  const RESEND_COOLDOWN_S = 60;
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resending, setResending] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [showResendInLogin, setShowResendInLogin] = useState(false);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const id = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+  }, [resendCooldown]);
+
+  async function handleResend() {
+    if (resending || resendCooldown > 0) return;
+    setResending(true);
+    setResendMessage(null);
+    const res = await resendSignupConfirmation(email);
+    setResending(false);
+    if (res.error) {
+      setResendMessage(res.error);
+      return;
+    }
+    setResendMessage("تم إرسال رابط التفعيل مرة أخرى. تحقق من صندوق الوارد والبريد المزعج.");
+    setResendCooldown(RESEND_COOLDOWN_S);
+  }
 
   function switchMode(next: "signup" | "login") {
     setMode(next);
     setErrors(new Set());
     setFormError(null);
     setConfirmationSent(false);
+    setResendMessage(null);
+    setShowResendInLogin(false);
   }
 
   function validate(): boolean {
@@ -51,19 +80,33 @@ export default function AuthEmailScreen() {
 
   async function handleSubmit() {
     setFormError(null);
+    setShowResendInLogin(false);
     if (!validate()) return;
     setSubmitting(true);
     try {
       if (isSignup) {
         const res = await signUpWithEmail(email, password, fullName);
+        if (res.alreadyRegistered) {
+          // ↔ البريد مسجّل قبل كده: نحوّله لتسجيل الدخول (بنفس البريد) مع الرسالة.
+          setMode("login");
+          setErrors(new Set());
+          setFormError(res.error);
+          return;
+        }
         if (res.error) { setFormError(res.error); return; }
         if (res.needsEmailConfirmation) {
+          setResendMessage(null);
+          setResendCooldown(RESEND_COOLDOWN_S);
           setConfirmationSent(true);
           return;
         }
       } else {
         const res = await signInWithEmailPassword(email, password);
-        if (res.error) { setFormError(res.error); return; }
+        if (res.error) {
+          setFormError(res.error);
+          setShowResendInLogin(!!res.notConfirmed);
+          return;
+        }
       }
 
       const uid = getAuthSnapshot().user?.id;
@@ -96,12 +139,26 @@ export default function AuthEmailScreen() {
         <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
           {confirmationSent ? (
             <View style={styles.confirmBox}>
-              <Text style={styles.confirmTitle}>{t("تم إنشاء الحساب")}</Text>
+              <Text style={styles.confirmTitle}>{t("تحقق من بريدك الإلكتروني")}</Text>
               <Text style={styles.confirmText}>
                 {t("أرسلنا رابط تفعيل إلى")} {email.trim()}. {t("افتح بريدك الإلكتروني وفعّل الحساب، ثم سجّل الدخول من هنا.")}
               </Text>
+              <Text style={styles.confirmHint}>{t("لم تجد الرسالة؟ تحقق من البريد المزعج (Spam) أو أعد الإرسال.")}</Text>
               <Pressable style={styles.primaryBtn} onPress={() => switchMode("login")}>
                 <Text style={styles.primaryBtnText}>{t("الذهاب لتسجيل الدخول")}</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryBtn} onPress={handleResend} disabled={resending || resendCooldown > 0}>
+                {resending ? (
+                  <ActivityIndicator color="#22A652" size="small" />
+                ) : (
+                  <Text style={[styles.secondaryBtnText, resendCooldown > 0 && { opacity: 0.5 }]}>
+                    {resendCooldown > 0 ? `${t("إعادة الإرسال بعد")} ${resendCooldown} ${t("ثانية")}` : t("إعادة إرسال رابط التفعيل")}
+                  </Text>
+                )}
+              </Pressable>
+              {!!resendMessage && <Text style={styles.confirmHint}>{t(resendMessage)}</Text>}
+              <Pressable onPress={() => { setConfirmationSent(false); setResendMessage(null); }}>
+                <Text style={styles.switchModeText}>{t("تعديل البريد الإلكتروني")}</Text>
               </Pressable>
             </View>
           ) : (
@@ -164,6 +221,21 @@ export default function AuthEmailScreen() {
 
               {!!formError && <Text style={styles.formError}>{t(formError)}</Text>}
 
+              {!isSignup && showResendInLogin && (
+                <>
+                  <Pressable style={styles.secondaryBtn} onPress={handleResend} disabled={resending || resendCooldown > 0}>
+                    {resending ? (
+                      <ActivityIndicator color="#22A652" size="small" />
+                    ) : (
+                      <Text style={[styles.secondaryBtnText, resendCooldown > 0 && { opacity: 0.5 }]}>
+                        {resendCooldown > 0 ? `${t("إعادة الإرسال بعد")} ${resendCooldown} ${t("ثانية")}` : t("إعادة إرسال رابط التفعيل")}
+                      </Text>
+                    )}
+                  </Pressable>
+                  {!!resendMessage && <Text style={styles.confirmHint}>{t(resendMessage)}</Text>}
+                </>
+              )}
+
               <Pressable style={styles.primaryBtn} onPress={handleSubmit} disabled={submitting}>
                 {submitting ? (
                   <ActivityIndicator color="#fff" size="small" />
@@ -203,9 +275,15 @@ function createStyles(themeColors: ThemeColors) {
     field: { gap: 6 },
     formError: { color: "#E5484D", fontSize: 12.5, fontWeight: "700", textAlign: "center" },
     primaryBtn: {
-      backgroundColor: "#22A652", borderRadius: 14, paddingVertical: 15,
+      backgroundColor: "#22A652", borderRadius: 14, paddingVertical: 15, paddingHorizontal: 28,
       alignItems: "center", justifyContent: "center", marginTop: 4,
     },
+    secondaryBtn: {
+      borderWidth: 1.5, borderColor: "#22A652", borderRadius: 14, paddingVertical: 12, paddingHorizontal: 24,
+      alignItems: "center", justifyContent: "center", minWidth: 180,
+    },
+    secondaryBtnText: { color: "#22A652", fontSize: 13.5, fontWeight: "800" },
+    confirmHint: { fontSize: 12, color: themeColors.textSubtle, textAlign: "center", lineHeight: 19 },
     primaryBtnText: { color: "#fff", fontSize: 14.5, fontWeight: "800" },
     switchModeBtn: { alignItems: "center", paddingVertical: 10 },
     switchModeText: { color: themeColors.isDark ? "#9FB0BE" : "#5B6B75", fontSize: 12.5, fontWeight: "700" },

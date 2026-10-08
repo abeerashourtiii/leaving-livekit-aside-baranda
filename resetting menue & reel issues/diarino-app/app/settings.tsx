@@ -20,7 +20,8 @@ import { ThemeSelectorModal } from "../components/account/ThemeSelectorModal";
 import { LanguageSelectorModal } from "../components/account/LanguageSelectorModal";
 import { ContentSettingsModal } from "../components/account/ContentSettingsModal";
 import { ComplaintsSuggestionsModal } from "../components/account/ComplaintsSuggestionsModal";
-import { ShareProfileModal } from "../components/account/ShareProfileModal";
+import { showToast } from "../components/shared/Toast";
+import { buildProfileLink, shareLink } from "../lib/shareLinks";
 import { PictureInPictureModal } from "../components/shared/PictureInPictureModal";
 import { useIsAdmin } from "../lib/hooks/useIsAdmin";
 
@@ -53,7 +54,6 @@ export default function SettingsScreen() {
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
   const [contentSettingsVisible, setContentSettingsVisible] = useState(false);
   const [complaintsVisible, setComplaintsVisible] = useState(false);
-  const [shareProfileVisible, setShareProfileVisible] = useState(false);
   const [pipModalVisible, setPipModalVisible] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const logSupportContact = useLogSupportContact();
@@ -65,6 +65,22 @@ export default function SettingsScreen() {
   function goToProfile() {
     if (isGuest) { goToLogin(); return; }
     router.push("/edit-profile");
+  }
+
+  // ↔ "مشاركة البروفايل": نفس مشاركة الريل — شيت المشاركة الأصلي بنص + رابط
+  // https://<domain>/seller/<id> بيفتح صفحة المعلن داخل التطبيق (أندرويد/آيفون)
+  // أو نسخة الويب. الضيف مالوش بروفايل يتشارك، فبنوديه لتسجيل الدخول زى "حسابي".
+  async function handleShareProfile() {
+    if (isGuest || !user) { goToLogin(); return; }
+    const name = profile?.fullName?.trim();
+    const caption = t("شوف بروفايلي على باراندا");
+    const result = await shareLink({
+      text: name ? `${name} — ${caption}` : caption,
+      url: buildProfileLink(user.id),
+      dialogTitle: t("مشاركة البروفايل"),
+    });
+    if (result === "copied") showToast(t("تم نسخ رابط البروفايل"));
+    else if (result === "failed") showToast(t("تعذرت المشاركة، حاول مرة أخرى"));
   }
 
   function toggleAllNotifications() {
@@ -148,7 +164,7 @@ export default function SettingsScreen() {
         </Section>
 
         <Section title={t("الحساب")} themeColors={themeColors}>
-          <Row icon={<ShareIcon />} label={t("مشاركة البروفايل")} onPress={() => setShareProfileVisible(true)} />
+          <Row icon={<ShareIcon />} label={t("مشاركة البروفايل")} onPress={() => { void handleShareProfile(); }} />
           <Row icon={<BellIcon />} label={t("تنبيهاتي المحفوظة")} onPress={() => router.push("/saved-alerts")} />
           {!checkingAdmin && isAdmin && (
             <Row icon={<AdminIcon />} label={t("لوحة تحكم الأدمن")} onPress={() => router.push("/admin")} />
@@ -220,7 +236,6 @@ export default function SettingsScreen() {
       <ThemeSelectorModal visible={themeModalVisible} onClose={() => setThemeModalVisible(false)} />
       <ContentSettingsModal visible={contentSettingsVisible} onClose={() => setContentSettingsVisible(false)} />
       <ComplaintsSuggestionsModal visible={complaintsVisible} onClose={() => setComplaintsVisible(false)} />
-      <ShareProfileModal visible={shareProfileVisible} onClose={() => setShareProfileVisible(false)} />
       <PictureInPictureModal visible={pipModalVisible} onClose={() => setPipModalVisible(false)} />
     </View>
   );

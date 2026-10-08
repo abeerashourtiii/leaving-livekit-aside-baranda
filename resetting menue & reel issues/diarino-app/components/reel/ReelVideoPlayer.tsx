@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { ComponentProps } from "react";
 import { StyleSheet } from "react-native";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { setPiPActive } from "../../lib/pipState";
+import { isAppForeground, setPiPActive } from "../../lib/pipState";
 import { useEventListener } from "expo";
 import { usePiPPreference } from "../../lib/hooks/usePiPPreference";
 
@@ -21,6 +21,9 @@ type Props = {
   // ReelCard بيستخدمه يشيل صورة البوستر اللي فوق الفيديو (لحد وقتها
   // الـ VideoView الأصلية بتبقى سودا)، فمفيش وميض أسود عند الوصول لريل.
   onPlayingChange?: (isPlaying: boolean) => void;
+  // ↔ بيتنده لما المستخدم يقفل نافذة PiP العائمة بزر ✕ (مش بزر التوسيع): الريل وقف بصوته،
+  // وReelCard بيحوّل حالته لـ "متوقف" فلما المستخدم يرجع للتطبيق يلاقيه واقف (زى يوتيوب).
+  onPiPClosed?: () => void;
 };
 
 // ↔ ترقية expo-av → expo-video (طلب المستخدم — الميزة 2: PiP). العنصر ده
@@ -36,7 +39,7 @@ type Props = {
 // unmount بالكامل حسب isNearActive بيحل المشكلة من غير ما يخالف قواعد
 // الـ Hooks.
 export const ReelVideoPlayer = forwardRef<ReelVideoPlayerHandle, Props>(function ReelVideoPlayer(
-  { uri, isActive, paused, speed, autoAdvance, muted, onPosition, onFinished, onPlayingChange },
+  { uri, isActive, paused, speed, autoAdvance, muted, onPosition, onFinished, onPlayingChange, onPiPClosed },
   ref
 ) {
   const { preference: pipPreference } = usePiPPreference();
@@ -99,6 +102,26 @@ export const ReelVideoPlayer = forwardRef<ReelVideoPlayerHandle, Props>(function
     }
   }, [player, isActive, paused]);
 
+  // ↔ إغلاق نافذة PiP بزر ✕ لازم يوقّف الريل وصوته. السبب إن الإغلاق بيوصل للتطبيق بنفس حدث
+  // "التوسيع" (onPictureInPictureStop) وكان الصوت بيكمّل شغال فى الخلفية. الفرق بين الحالتين:
+  // بعد التوسيع التطبيق بيرجع للواجهة، وبعد الإغلاق بيفضل فى الخلفية — فبنستنى لحظة (لحد ما
+  // حالة التطبيق تستقر) ونوقف الـ player لو لسه فى الخلفية. أندرويد كمان عنده إيقاف أصلى فى
+  // patches/expo-video+2.0.6.patch (PiPSessionFragment.onStop) — دى الحماية الثانية للمنصات كلها.
+  const pipStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (pipStopTimerRef.current) clearTimeout(pipStopTimerRef.current);
+  }, []);
+  const handlePiPStop = () => {
+    setPiPActive(false);
+    if (pipStopTimerRef.current) clearTimeout(pipStopTimerRef.current);
+    pipStopTimerRef.current = setTimeout(() => {
+      pipStopTimerRef.current = null;
+      if (isAppForeground()) return; // رجع للتطبيق (توسيع) — الريل يكمّل عادى
+      try { player.pause(); } catch { /* الـ player اتفكّ */ }
+      onPiPClosed?.();
+    }, 600);
+  };
+
   useEventListener(player, "playingChange", (payload) => {
     onPlayingChange?.(payload.isPlaying);
   });
@@ -116,18 +139,14 @@ export const ReelVideoPlayer = forwardRef<ReelVideoPlayerHandle, Props>(function
   useImperativeHandle(ref, () => ({
     seekToPct(pct: number) {
       if (!player.duration) return;
-      player.currentTime = pct * player.duration;
-      // ↔ إصلاح "الريل مش بيستأنف التشغيل بسلاسة من نقطة إفلات كرة
-      // الـ seek": بعض تطبيقات الفيديو الأصلية اللي وراء expo-video
-      // (خصوصًا الويب، وأحيانًا أثناء إعادة التخزين المؤقت (buffering)
-      // على أندرويد/آيفون) بترجع لحالة "متوقف" فور ما نضبط currentTime،
-      // حتى لو كان الفيديو شغّال فعلًا قبل السحب — فبنطلب التشغيل
-      // صراحةً تاني فورًا بعد السحب لو المفروض يكون شغّال وقتها، عشان
-      // الريل يستأنف فعليًا من نفس النقطة اللي المستخدم أفلت عندها،
-      // بنفس السلوك على أندرويد وiOS والـ APK والويب.
-      if (isActive && !paused) player.play();
+      finishedRef.current = false;
+      player.currentTime = Math.max(0, Math.min(1, pct)) * player.duration;
+      // ↔ الريل لازم *يستأنف* من نقطة إفلات الكرة: بنطلب التشغيل صراحةً بعد ضبط الموضع (بعض الـ players —
+      //   الويب خصوصًا، وأحيانًا أثناء buffering على أندرويد/آيفون — بترجع لحالة "متوقف" بعد تغيير currentTime).
+      //   ReelCard بيشيل حالة الإيقاف (paused/scrubbing) فى نفس اللحظة، فالـ effect تحت كمان بيشغّله.
+      player.play();
     },
-  }), [player, isActive, paused]);
+  }), [player]);
 
   return (
     <VideoView
@@ -156,7 +175,7 @@ export const ReelVideoPlayer = forwardRef<ReelVideoPlayerHandle, Props>(function
       // ↔ شاشة الريلز بتثبّت ارتفاع الريل والريل النشط طول مدة PiP (شوف lib/pipState.ts) عشان
       // نافذة PiP تفضل بتعرض نفس الريل بدل ما تتبدّل أو تتوقف.
       onPictureInPictureStart={() => setPiPActive(true)}
-      onPictureInPictureStop={() => setPiPActive(false)}
+      onPictureInPictureStop={handlePiPStop}
     />
   );
 });

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Text, View, ActivityIndicator, Platform } from 'react-native';
+import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { completeOAuthCallback } from '../lib/hooks/useAuth';
 import { getAuthSnapshot } from '../lib/hooks/useCurrentUser';
@@ -29,6 +30,16 @@ export default function AuthCallback() {
         }
 
         // 2. معالجة الموبايل والـ APK (Android / iOS Handling)
+        // ↔ رابط تفعيل البريد (أو أى رابط auth) بيفتح التطبيق على diarino://auth-callback#...
+        // — لازم نكمّل الجلسة من الرابط نفسه (tokens/code) قبل ما نقرر نوجّه فين.
+        // (completeOAuthCallback بيمنع تنفيذ نفس الرابط مرتين فمفيش تعارض مع تسجيل جوجل.)
+        if (Platform.OS !== 'web') {
+          const linkUrl = await Linking.getInitialURL();
+          if (linkUrl && linkUrl.includes('auth-callback') && /access_token=|code=|error_description=/.test(linkUrl)) {
+            const callbackResult = await completeOAuthCallback(linkUrl);
+            if (callbackResult.error && !getAuthSnapshot().user) throw new Error(callbackResult.error);
+          }
+        }
         if (getAuthSnapshot().user && isMounted) {
           router.replace('/(tabs)');
         } else if (isMounted) {

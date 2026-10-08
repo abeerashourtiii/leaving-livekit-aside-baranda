@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { Alert } from "react-native";
 import { Path, Rect, Circle } from "react-native-svg";
 import { ActionSheet, ActionSheetItem } from "../shared/ActionSheet";
 import { ConfirmModal } from "../shared/ConfirmModal";
@@ -11,19 +10,86 @@ import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { uploadToCloudinary } from "../../lib/cloudinary";
 import { useLogMedia } from "../../lib/hooks/useMedia";
+import { showToast } from "../shared/Toast";
 
 type Props = { visible: boolean; live: SavedLive | null; onClose: () => void };
 
+// ActionSheet بيقفل نفسه (onClose) قبل ما يشغّل إجراء الصف، وأمّ الشاشة بتصفّر `live`
+// أول ما يتقفل. فنافذتا التأكيد (حذف اللايف / إخفاء التعليقات) لازم تعيشوا خارج الـ sheet
+// ومعاهم اللايف المستهدف محفوظ فى state — قبل كده كانوا جوه نفس المكوّن اللى بيرجّع null
+// لما `live` يبقى null، فنافذة التأكيد ما كانتش بتظهر أبدًا. وعلى آيفون فتح Modal فى نفس
+// لحظة قفل التانى بيتتجاهل، فبنتأخر شوية بعد القفل.
+const AFTER_SHEET_CLOSE_MS = 350;
+
 export function LiveActionSheet({ visible, live, onClose }: Props) {
+  const { t } = useLanguage();
+  const { toggleSavedLiveComments, removeSavedLive } = useMyContent();
+  const [deleteTarget, setDeleteTarget] = useState<SavedLive | null>(null);
+  const [commentsTarget, setCommentsTarget] = useState<SavedLive | null>(null);
+  const willHideComments = commentsTarget ? !commentsTarget.commentsHidden : true;
+
+  return (
+    <>
+      {live && (
+        <LiveActionSheetInner
+          visible={visible}
+          live={live}
+          onClose={onClose}
+          onRequestDelete={(l) => setTimeout(() => setDeleteTarget(l), AFTER_SHEET_CLOSE_MS)}
+          onRequestComments={(l) => setTimeout(() => setCommentsTarget(l), AFTER_SHEET_CLOSE_MS)}
+        />
+      )}
+
+      <ConfirmModal
+        visible={!!commentsTarget}
+        title={willHideComments ? t("إخفاء التعليقات والتفاعلات؟") : t("إظهار التعليقات والتفاعلات؟")}
+        text={
+          commentsTarget
+            ? willHideComments
+              ? `${t("عند إخفاء التعليقات لن تظهر التعليقات ولا التفاعلات في إعادة بث")} "${t(commentsTarget.title)}".`
+              : `${t("عند إظهار التعليقات ستُعرض التعليقات في إعادة بث")} "${t(commentsTarget.title)}".`
+            : ""
+        }
+        confirmLabel={willHideComments ? t("تأكيد الإخفاء") : t("تأكيد الإظهار")}
+        onCancel={() => setCommentsTarget(null)}
+        onConfirm={() => {
+          if (commentsTarget) toggleSavedLiveComments(commentsTarget.id);
+          setCommentsTarget(null);
+        }}
+      />
+
+      <ConfirmModal
+        visible={!!deleteTarget}
+        title={t("حذف اللايف")}
+        text={deleteTarget ? `${t("هل أنت متأكد من حذف")} "${t(deleteTarget.title)}"؟ ${t("سيتم حذفه نهائياً من حسابك ومن صفحة المعلن إن كان منشوراً.")}` : ""}
+        confirmLabel={t("حذف")}
+        danger
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) {
+            removeSavedLive(deleteTarget.id);
+            showToast(t("تم حذف اللايف"));
+          }
+          setDeleteTarget(null);
+        }}
+      />
+    </>
+  );
+}
+
+type InnerProps = {
+  visible: boolean;
+  live: SavedLive;
+  onClose: () => void;
+  onRequestDelete: (live: SavedLive) => void;
+  onRequestComments: (live: SavedLive) => void;
+};
+
+function LiveActionSheetInner({ visible, live, onClose, onRequestDelete, onRequestComments }: InnerProps) {
   const { t } = useLanguage();
   const { user } = useCurrentUser();
   const logMedia = useLogMedia();
-  const {
-    togglePinLive, toggleSavedLivePublic, toggleSavedLiveComments, removeSavedLive, updateSavedLive,
-  } = useMyContent();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [confirmComments, setConfirmComments] = useState(false);
-  if (!live) return null;
+  const { togglePinLive, toggleSavedLivePublic, updateSavedLive } = useMyContent();
 
   async function pickPoster() {
     if (!user?.id) return;
@@ -41,7 +107,7 @@ export function LiveActionSheet({ visible, live, onClose }: Props) {
       logMedia.mutate({ ownerId: user.id, type: "image", context: "live_poster", contextId: live!.id, result: uploadResult });
       updateSavedLive(live!.id, { posterUrl: uploadResult.url });
     } catch {
-      Alert.alert(t("تعذر رفع الصورة"), t("حاول مرة أخرى."));
+      showToast(`${t("تعذر رفع الصورة")} — ${t("حاول مرة أخرى.")}`);
     }
   }
 
@@ -84,7 +150,8 @@ export function LiveActionSheet({ visible, live, onClose }: Props) {
       icon: (p) => <Path {...p} d="M12 17v5M9 10.76V6a2 2 0 012-2h2a2 2 0 012 2v4.76a2 2 0 00.4 1.2L18 15H6l2.6-3.04a2 2 0 00.4-1.2z" />,
       onPress: () => {
         const result = togglePinLive(live.id);
-        if (result === "limit") Alert.alert(t("الحد الأقصى ٣ لايفات مثبتة"));
+        // Alert.alert مبيظهرش على الويب — Toast بيشتغل على كل المنصات.
+        if (result === "limit") showToast(t("الحد الأقصى ٣ لايفات مثبتة"));
       },
     },
     {
@@ -93,45 +160,16 @@ export function LiveActionSheet({ visible, live, onClose }: Props) {
       icon: (p) => live.commentsHidden
         ? <Path {...p} d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
         : <Path {...p} d="M17.94 17.94A10.94 10.94 0 0112 20c-7 0-11-8-11-8a20.5 20.5 0 015.06-5.94M9.9 4.24A9.94 9.94 0 0112 4c7 0 11 8 11 8a20.53 20.53 0 01-3.16 4.19M1 1l22 22" />,
-      onPress: () => setConfirmComments(true),
+      onPress: () => onRequestComments(live),
     },
     {
       key: "delete",
       label: t("حذف اللايف"),
       danger: true,
       icon: (p) => <Path {...p} d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />,
-      onPress: () => setConfirmDelete(true),
+      onPress: () => onRequestDelete(live),
     },
   ];
 
-  const willHideComments = !live.commentsHidden;
-
-  return (
-    <>
-      <ActionSheet visible={visible} title={t(live.title)} items={items} onClose={onClose} />
-
-      <ConfirmModal
-        visible={confirmComments}
-        title={willHideComments ? t("إخفاء التعليقات والتفاعلات؟") : t("إظهار التعليقات والتفاعلات؟")}
-        text={
-          willHideComments
-            ? `${t("عند إخفاء التعليقات لن تظهر التعليقات ولا التفاعلات في إعادة بث")} "${t(live.title)}".`
-            : `${t("عند إظهار التعليقات ستُعرض التعليقات في إعادة بث")} "${t(live.title)}".`
-        }
-        confirmLabel={willHideComments ? t("تأكيد الإخفاء") : t("تأكيد الإظهار")}
-        onCancel={() => setConfirmComments(false)}
-        onConfirm={() => { toggleSavedLiveComments(live.id); setConfirmComments(false); }}
-      />
-
-      <ConfirmModal
-        visible={confirmDelete}
-        title={t("حذف اللايف")}
-        text={`${t("هل أنت متأكد من حذف")} "${t(live.title)}"؟ ${t("سيتم حذفه نهائياً من حسابك ومن صفحة المعلن إن كان منشوراً.")}`}
-        confirmLabel={t("حذف")}
-        danger
-        onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => { removeSavedLive(live.id); setConfirmDelete(false); }}
-      />
-    </>
-  );
+  return <ActionSheet visible={visible} title={t(live.title)} items={items} onClose={onClose} />;
 }

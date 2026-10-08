@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { I18nManager, View, Text, Pressable, StyleSheet, PanResponder, GestureResponderEvent, PanResponderGestureState, ViewStyle } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { useReelControlsBottomOffset } from "../../lib/uiConstants";
@@ -52,10 +52,14 @@ type Props = {
   durationSec: number;
   isPlaying: boolean;
   onTogglePlay: () => void;
-  onSeek: (pct: number) => void; // 0..1
+  onSeek: (pct: number) => void; // 0..1 — بيتنده لما المستخدم يفلت الكرة (الريل لازم يستأنف من النقطة دى)
+  // ↔ بدء/إلغاء السحب: ReelCard بيوقف الفيديو مؤقتًا أثناء السحب (سحب سلس من غير تقطيع صوت/تعارض مع
+  //   تحديثات الموضع) ويستأنفه من نقطة الإفلات فى onSeek.
+  onScrubStart?: () => void;
+  onScrubCancel?: () => void;
 };
 
-export function ReelSeekBar({ currentSec, durationSec, isPlaying, onTogglePlay, onSeek }: Props) {
+export function ReelSeekBar({ currentSec, durationSec, isPlaying, onTogglePlay, onSeek, onScrubStart, onScrubCancel }: Props) {
   const trackRef = useRef<View>(null);
   const trackWidth = useRef(0);
   // ↔ إصلاح "كرة الـ seek مش سلسة أثناء السحب على الويب": كان الحساب
@@ -87,8 +91,20 @@ export function ReelSeekBar({ currentSec, durationSec, isPlaying, onTogglePlay, 
   // إصبعه، فالفيديو بينتقل فورًا للنقطة المختارة زي المطلوب بالظبط.
   const [dragging, setDragging] = useState(false);
   const [dragPct, setDragPct] = useState(0);
-  const displayPct = dragging ? dragPct : pct;
-  const displaySec = dragging ? dragPct * durationSec : currentSec;
+  // ↔ بعد الإفلات: الـ player بيحتاج لحظة لحد ما يتنفّذ الـ seek ويبعت موضع جديد (timeUpdate كل 0.25s، وممكن
+  //   أول حدث بعد الـ seek يكون لسه بموضع قديم) — فمن غير تثبيت كانت الكرة بترجع للموضع القديم لحظيًا وبعدين
+  //   تقفز للجديد (تقطيع واضح). heldPct بيثبّت الكرة على نقطة الإفلات لحد ما الموضع الحقيقي يوصلها (أو 1.5 ثانية).
+  const [heldPct, setHeldPct] = useState<number | null>(null);
+  useEffect(() => {
+    if (heldPct == null) return;
+    const timeout = setTimeout(() => setHeldPct(null), 1500);
+    return () => clearTimeout(timeout);
+  }, [heldPct]);
+  useEffect(() => {
+    if (heldPct != null && durationSec > 0 && Math.abs(currentSec - heldPct * durationSec) < 0.6) setHeldPct(null);
+  }, [currentSec, heldPct, durationSec]);
+  const displayPct = dragging ? dragPct : heldPct ?? pct;
+  const displaySec = dragging ? dragPct * durationSec : heldPct != null ? heldPct * durationSec : currentSec;
 
   function pctFromPageX(pageX: number): number {
     if (!trackWidth.current) return 0;
@@ -105,13 +121,33 @@ export function ReelSeekBar({ currentSec, durationSec, isPlaying, onTogglePlay, 
     return pctFromPageX(pageX);
   }
 
+  // ↔ الـ PanResponder بيتعمل مرة واحدة، فبنقرا الـ callbacks من refs عشان تفضل دايمًا آخر نسخة (بدل ما
+  //   تتجمّد على closure أول render — كان بيخلّى seek يستخدم حالة قديمة).
+  const onSeekRef = useRef(onSeek);
+  onSeekRef.current = onSeek;
+  const onScrubStartRef = useRef(onScrubStart);
+  onScrubStartRef.current = onScrubStart;
+  const onScrubCancelRef = useRef(onScrubCancel);
+  onScrubCancelRef.current = onScrubCancel;
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e, g) => {
+        const pageX = g?.moveX || e.nativeEvent.pageX;
+        setHeldPct(null);
         setDragging(true);
-        setDragPct(pctFromEvent(e, g));
+        setDragPct(pctFromPageX(pageX));
+        onScrubStartRef.current?.();
+        // ↔ نعيد قياس موضع الشريط لحظة اللمس: الريل المفتوح من البحث/المعلن/الحساب بيظهر داخل شاشة/نافذة
+        //   (fullScreenModal / Modal) بتتحرك أثناء الانتقال، فالقياس الأولي (onLayout) ممكن يبقى متزحزح
+        //   فتتحسب نقطة الإفلات غلط. القياس هنا بعد ما الشاشة تستقر، وبنعيد حساب النسبة بيه فورًا.
+        trackRef.current?.measureInWindow((x, _y, w) => {
+          trackPageX.current = x;
+          if (w) trackWidth.current = w;
+          setDragPct(pctFromPageX(pageX));
+        });
       },
       onPanResponderMove: (e, g) => {
         setDragPct(pctFromEvent(e, g));
@@ -119,9 +155,13 @@ export function ReelSeekBar({ currentSec, durationSec, isPlaying, onTogglePlay, 
       onPanResponderRelease: (e, g) => {
         const finalPct = pctFromEvent(e, g);
         setDragging(false);
-        onSeek(finalPct);
+        setHeldPct(finalPct);
+        onSeekRef.current(finalPct);
       },
-      onPanResponderTerminate: () => setDragging(false),
+      onPanResponderTerminate: () => {
+        setDragging(false);
+        onScrubCancelRef.current?.();
+      },
     })
   ).current;
 

@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { router, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import {
-  View, Text, Pressable, ScrollView, StyleSheet, TextInput, Modal, Alert,
+  View, Text, Pressable, ScrollView, StyleSheet, TextInput, Modal, Alert, ActivityIndicator,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import Svg, { Path, Rect, Circle } from "react-native-svg";
-import { useMyProperties, useProperties } from "../../lib/hooks/useProperties";
+import { MAX_PINNED_PROPERTIES, useMyProperties, useProperties } from "../../lib/hooks/useProperties";
+import { padToEvenColumns } from "../../lib/gridPadding";
+import { AdGridCard } from "../../components/property/AdGridCard";
 import { useMyRequests, useRequests, useDeleteRequest } from "../../lib/hooks/useRequests";
 import { fmtPrice } from "../../lib/types";
-import { ReelBackground } from "../../components/reel/ReelBackground";
 import { PageTopBar } from "../../components/shared/PageTopBar";
 import { NotificationsDropdown } from "../../components/notifications/NotificationsDropdown";
 import { useNotifications } from "../../lib/hooks/useNotifications";
@@ -17,14 +18,15 @@ import { useFavorites } from "../../lib/hooks/useFavorites";
 import { useMyContent } from "../../lib/hooks/useMyContent";
 import { useSyncProcessingRecordings } from "../../lib/hooks/useLiveRecordingStatus";
 import { AdActionSheet } from "../../components/account/AdActionSheet";
+import { ConfirmModal } from "../../components/shared/ConfirmModal";
 import { LiveActionSheet } from "../../components/account/LiveActionSheet";
 import { Property } from "../../lib/types";
 import { SavedLive } from "../../data/saved-live-types";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
+import { useProfile } from "../../lib/hooks/useProfile";
+import { showToast } from "../../components/shared/Toast";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
-import { supabase } from "../../lib/supabase";
-import { queryClient } from "../../lib/queryClient";
 import { uploadToCloudinary, cldOptimized } from "../../lib/cloudinary";
 import { useLogMedia } from "../../lib/hooks/useMedia";
 import { useDrafts, useDraftMutations } from "../../lib/hooks/useDrafts";
@@ -60,8 +62,13 @@ export default function AccountScreen() {
     }
   }, [liveFeatureEnabled, activeTab]);
 
-  const [avatarUri, setAvatarUri] = useState<string | null>(null);
-  const [bio, setBio] = useState("");
+  // ↔ الاسم/الصورة/النبذة من نفس كاش البروفايل المشترك (useProfile) — أى تغيير من
+  // «تعديل بيانات الحساب» أو من هنا بيظهر لحظيًا، وبعدها فى صفحة المعلن والريلز والقائمة.
+  const { profile, update: updateProfile } = useProfile();
+  const avatarUri = profile?.avatarUrl ?? null;
+  const bio = profile?.bio ?? "";
+  const profileName = profile?.fullName?.trim() || displayName;
+  const [bioSaving, setBioSaving] = useState(false);
   const [bioModalVisible, setBioModalVisible] = useState(false);
   const [bioDraft, setBioDraft] = useState("");
 
@@ -74,7 +81,31 @@ export default function AccountScreen() {
   const { data: allRequests = [] } = useRequests();
   const { data: allProperties = [] } = useProperties();
   const deleteRequest = useDeleteRequest();
-  const { data: myAds = [] } = useMyProperties(user?.id);
+  const { data: myAdsRaw = [], isLoading: adsLoading, isError: adsError, refetch: refetchAds } = useMyProperties(user?.id);
+  // ↔ المثبّتة فى الأول (الأحدث تثبيتًا أولًا) وبعدها الأحدث نشرًا — نفس ترتيب صفحة المعلن.
+  const myAds = useMemo(
+    () => [...myAdsRaw].sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+      if (a.pinned && b.pinned) return (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0);
+      return b.createdAt - a.createdAt;
+    }),
+    [myAdsRaw]
+  );
+  const pinnedAdsCount = myAds.filter((a) => a.pinned).length;
+  // ↔ صفوف من عمودين (الأخير بيتكمّل بعنصر فاضى عشان يبقى بنص الصف زى باقى الكروت).
+  const adRows = useMemo(() => {
+    const padded = padToEvenColumns(myAds);
+    const rows: (Property | null)[][] = [];
+    for (let i = 0; i < padded.length; i += 2) rows.push(padded.slice(i, i + 2));
+    return rows;
+  }, [myAds]);
+  // ↔ كل مرة الشاشة تاخد التركيز (مثلًا بعد النشر أو التعديل من create-listing)
+  // نجيب إعلاناتي من الخادم من جديد — الإعلان المنشور لازم يظهر فورًا.
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) void refetchAds();
+    }, [user?.id, refetchAds])
+  );
   const { data: listingDrafts = [] } = useDrafts("listing");
   const { data: requestDrafts = [] } = useDrafts("request");
   
@@ -85,18 +116,44 @@ export default function AccountScreen() {
   }, [listingDrafts, requestDrafts]);
 
   const { remove: removeDraft } = useDraftMutations();
+
+  // ↔ أى حذف/إزالة من صفحة الحساب (طلب، عنصر من المفضلة، مسودة) لازم يعدّى على نافذة
+  // تأكيد قبل التنفيذ — قبل كده الأزرار دى كانت بتنفّذ فورًا بلمسة واحدة. (حذف الإعلان
+  // واللايف ليهم نافذة تأكيد فى AdActionSheet / LiveActionSheet.) ConfirmModal هو Modal
+  // أصلى فبيشتغل نفسه على أندرويد وآيفون والويب (Alert.alert مبيشتغلش على الويب).
+  type PendingRemoval = { kind: "request" | "favProperty" | "favRequest" | "draft"; id: string };
+  const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
+  const removalCopy = pendingRemoval?.kind === "request"
+    ? { title: t("حذف الطلب"), text: t("هل أنت متأكد من حذف هذا الطلب؟ لا يمكن التراجع عن هذا الإجراء."), confirm: t("حذف") }
+    : pendingRemoval?.kind === "draft"
+      ? { title: t("حذف المسودة"), text: t("هل أنت متأكد من حذف هذه المسودة؟ لا يمكن التراجع عن هذا الإجراء."), confirm: t("حذف") }
+      : { title: t("إزالة من المفضلة"), text: t("هل تريد إزالة هذا العنصر من المفضلة؟"), confirm: t("إزالة") };
+
+  function confirmRemoval() {
+    const target = pendingRemoval;
+    setPendingRemoval(null);
+    if (!target) return;
+    if (target.kind === "request") {
+      deleteRequest.mutate(target.id, {
+        onSuccess: () => showToast(t("تم حذف الطلب")),
+        onError: () => showToast(t("تعذر حذف الطلب، حاول مرة أخرى")),
+      });
+    } else if (target.kind === "draft") {
+      removeDraft.mutate(target.id, {
+        onSuccess: () => showToast(t("تم حذف المسودة")),
+        onError: () => showToast(t("تعذر حذف المسودة، حاول مرة أخرى")),
+      });
+    } else if (target.kind === "favProperty") {
+      toggleFavoriteProperty(target.id);
+    } else {
+      toggleFavoriteRequest(target.id);
+    }
+  }
   const [adSheetTarget, setAdSheetTarget] = useState<Property | null>(null);
   const [liveSheetTarget, setLiveSheetTarget] = useState<SavedLive | null>(null);
 
   const favProps = useMemo(() => allProperties.filter((p) => favoriteProperties.has(p.id)), [allProperties, favoriteProperties]);
   const favReqs = useMemo(() => allRequests.filter((r) => favoriteRequests.has(r.id)), [allRequests, favoriteRequests]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase.from("profiles").select("avatar_url").eq("id", user.id).maybeSingle().then(({ data }) => {
-      if (data?.avatar_url) setAvatarUri(data.avatar_url);
-    });
-  }, [user?.id]);
 
   async function pickAvatar() {
     if (!user?.id) return;
@@ -112,20 +169,26 @@ export default function AccountScreen() {
     try {
       const uploadResult = await uploadToCloudinary(uri, "image");
       logMedia.mutate({ ownerId: user.id, type: "image", context: "avatar", result: uploadResult });
-      const { error } = await supabase
-        .from("profiles")
-        .upsert({ id: user.id, avatar_url: uploadResult.url }, { onConflict: "id" });
-      if (error) throw error;
-      setAvatarUri(uploadResult.url);
-      queryClient.invalidateQueries({ queryKey: ["myAvatar"] });
+      await updateProfile.mutateAsync({ avatarUrl: uploadResult.url });
     } catch {
-      Alert.alert(t("تعذر رفع الصورة"), t("حاول مرة أخرى."));
+      // Alert.alert مبيظهرش على الويب — Toast بيشتغل على كل المنصات.
+      showToast(`${t("تعذر رفع الصورة")} — ${t("حاول مرة أخرى.")}`);
     }
   }
 
-  function saveBio() {
-    setBio(bioDraft.trim());
-    setBioModalVisible(false);
+  // ↔ النبذة بقت بتتحفظ فعليًا فى profiles.bio (قبل كده كانت حالة محلية بتضيع)
+  // وبتظهر فى صفحة المعلن (profiles_public.bio — migration 20261007000002).
+  async function saveBio() {
+    if (bioSaving) return;
+    setBioSaving(true);
+    try {
+      await updateProfile.mutateAsync({ bio: bioDraft.trim() });
+      setBioModalVisible(false);
+    } catch {
+      showToast(t("تعذر حفظ النبذة، حاول مرة أخرى"));
+    } finally {
+      setBioSaving(false);
+    }
   }
 
   const handleOpenLiveReplay = (live: SavedLive) => {
@@ -153,7 +216,7 @@ export default function AccountScreen() {
             {avatarUri ? (
               <Image source={{ uri: cldOptimized(avatarUri, "w_300,h_300,c_fill,q_auto,f_auto") }} style={StyleSheet.absoluteFill} contentFit="cover" />
             ) : (
-              <Text style={styles.avatarText}>{displayName.charAt(0)}</Text>
+              <Text style={styles.avatarText}>{profileName.charAt(0)}</Text>
             )}
             <View style={styles.avatarEditBadge}>
               <Svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2}>
@@ -161,7 +224,7 @@ export default function AccountScreen() {
               </Svg>
             </View>
           </Pressable>
-          <Text style={styles.username}>{displayName}</Text>
+          <Text style={styles.username}>{profileName}</Text>
           <Text style={styles.handle}>@user_baranda</Text>
         </View>
 
@@ -181,7 +244,16 @@ export default function AccountScreen() {
 
         <View style={styles.content}>
           {activeTab === "ads" && (
-            myAds.length === 0 ? (
+            adsLoading && myAds.length === 0 ? (
+              <View style={{ paddingVertical: 40, alignItems: "center" }}><ActivityIndicator color="#22A652" /></View>
+            ) : adsError && myAds.length === 0 ? (
+              <EmptyState
+                icon={<Svg width={56} height={56} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth={1.5}><Circle cx={12} cy={12} r={9} /><Path d="M12 8v5M12 16.5v.5" /></Svg>}
+                title="تعذر تحميل إعلاناتك"
+                actionLabel="إعادة المحاولة"
+                onAction={() => { void refetchAds(); }}
+              />
+            ) : myAds.length === 0 ? (
               <EmptyState
                 icon={<Svg width={56} height={56} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth={1.5}><Rect x={3} y={3} width={18} height={18} rx={2} /><Path d="M3 9h18M9 21V9" /></Svg>}
                 title="لا توجد إعلانات"
@@ -190,36 +262,55 @@ export default function AccountScreen() {
                 onAction={() => router.push("/(tabs)/menu")}
               />
             ) : (
-              <View style={styles.myAdsGrid}>
-                {myAds.map((ad) => (
-                  <Pressable
-                    key={ad.id}
-                    style={styles.myAdCell}
-                    onPress={() => router.push(`/property/${ad.id}`)}
-                    onLongPress={() => setAdSheetTarget(ad)}
-                  >
-                    <ReelBackground index={0} type={ad.type} />
-                    {ad.pinned && (
-                      <View style={styles.pinnedBadge}>
-                        <Svg width={10} height={10} viewBox="0 0 24 24" fill="white"><Path d="M12 17v5M9 10.76V6a2 2 0 012-2h2a2 2 0 012 2v4.76a2 2 0 00.4 1.2L18 15H6l2.6-3.04a2 2 0 00.4-1.2z" /></Svg>
-                      </View>
-                    )}
-                    <View style={[styles.adPurposeBadge, { backgroundColor: ad.purpose === "sale" ? "#22A652" : "#F4673F" }]}>
-                      <Text style={styles.adPurposeBadgeText}>{ad.purpose === "sale" ? t("بيع") : t("إيجار")}</Text>
-                    </View>
-                    <View style={styles.adPriceTag}><Text style={styles.adPriceTagText}>{fmtPrice(ad.price)} {t("ج.م")}</Text></View>
-                    <Pressable
-                      style={styles.adMoreBtn}
-                      onPress={(e) => { e.stopPropagation(); setAdSheetTarget(ad); }}
-                      hitSlop={6}
-                    >
-                      <Svg width={14} height={14} viewBox="0 0 24 24" fill="white">
-                        <Circle cx={12} cy={5} r={1.8} /><Circle cx={12} cy={12} r={1.8} /><Circle cx={12} cy={19} r={1.8} />
-                      </Svg>
-                    </Pressable>
-                  </Pressable>
+              <>
+              <Text style={styles.pinHint}>📌 {pinnedAdsCount}/{MAX_PINNED_PROPERTIES} {t("مثبتة في صفحة المعلن")}</Text>
+              {/* ↔ نفس كارت البحث وصفحة المعلن (components/property/AdGridCard.tsx):
+                  عمودين فى الصف وبنفس الحجم، والكارت الأخير المنفرد بنص الصف. */}
+              <View style={styles.adsGrid}>
+                {adRows.map((row, rowIndex) => (
+                  <View key={rowIndex} style={styles.adsRow}>
+                    {row.map((ad, colIndex) => ad === null ? (
+                      <View key={`filler-${colIndex}`} style={{ flex: 1 }} />
+                    ) : (
+                      <AdGridCard
+                        key={ad.id}
+                        item={ad}
+                        index={rowIndex * 2 + colIndex}
+                        onPress={() => router.push(`/property/${ad.id}/reel?sellerId=${ad.seller.id}`)}
+                        onLongPress={() => setAdSheetTarget(ad)}
+                        topStart={
+                          <Pressable
+                            style={styles.adMoreBtn}
+                            onPress={(e) => { e.stopPropagation(); setAdSheetTarget(ad); }}
+                            hitSlop={6}
+                          >
+                            <Svg width={14} height={14} viewBox="0 0 24 24" fill="white">
+                              <Circle cx={12} cy={5} r={1.8} /><Circle cx={12} cy={12} r={1.8} /><Circle cx={12} cy={19} r={1.8} />
+                            </Svg>
+                          </Pressable>
+                        }
+                        bottomStart={
+                          (ad.pinned || (ad.moderationStatus && ad.moderationStatus !== "approved")) ? (
+                            <>
+                              {ad.pinned && (
+                                <View style={styles.pinnedBadge}>
+                                  <Svg width={10} height={10} viewBox="0 0 24 24" fill="white"><Path d="M12 17v5M9 10.76V6a2 2 0 012-2h2a2 2 0 012 2v4.76a2 2 0 00.4 1.2L18 15H6l2.6-3.04a2 2 0 00.4-1.2z" /></Svg>
+                                </View>
+                              )}
+                              {ad.moderationStatus && ad.moderationStatus !== "approved" && (
+                                <View style={[styles.adStatusBadge, ad.moderationStatus === "rejected" && styles.adStatusBadgeRejected]}>
+                                  <Text style={styles.adStatusBadgeText}>{ad.moderationStatus === "rejected" ? t("مرفوض") : t("قيد المراجعة")}</Text>
+                                </View>
+                              )}
+                            </>
+                          ) : undefined
+                        }
+                      />
+                    ))}
+                  </View>
                 ))}
               </View>
+              </>
             )
           )}
 
@@ -238,7 +329,7 @@ export default function AccountScreen() {
                       <Text style={styles.favCardPrice}>{t("حتى")} {r.priceMax ? fmtPrice(r.priceMax) : "—"} {t("ج.م")}</Text>
                     </View>
                     <Text style={styles.favCardLoc}>📍 {r.province} · {r.location}</Text>
-                    <Pressable style={styles.removeBtn} onPress={() => deleteRequest.mutate(r.id)}>
+                    <Pressable style={styles.removeBtn} onPress={() => setPendingRemoval({ kind: "request", id: r.id })}>
                       <Text style={styles.removeBtnText}>🗑️ {t("حذف")}</Text>
                     </Pressable>
                   </View>
@@ -335,7 +426,7 @@ export default function AccountScreen() {
                           <Text style={styles.favCardPrice}>{fmtPrice(p.price)} {t("ج.م")} {p.purpose === "rent" ? t("/ شهر") : ""}</Text>
                         </View>
                         <Text style={styles.favCardLoc}>📍 {p.province} · {p.location}</Text>
-                        <Pressable style={styles.removeBtn} onPress={() => toggleFavoriteProperty(p.id)}>
+                        <Pressable style={styles.removeBtn} onPress={(e) => { e.stopPropagation(); setPendingRemoval({ kind: "favProperty", id: p.id }); }}>
                           <Text style={styles.removeBtnText}>⭐ {t("إزالة من المفضلة")}</Text>
                         </Pressable>
                       </Pressable>
@@ -352,7 +443,7 @@ export default function AccountScreen() {
                           <Text style={styles.favCardPrice}>{t("حتى")} {r.priceMax ? fmtPrice(r.priceMax) : "—"} {t("ج.م")}</Text>
                         </View>
                         <Text style={styles.favCardLoc}>📍 {r.province} · {r.location}</Text>
-                        <Pressable style={styles.removeBtn} onPress={() => toggleFavoriteRequest(r.id)}>
+                        <Pressable style={styles.removeBtn} onPress={() => setPendingRemoval({ kind: "favRequest", id: r.id })}>
                           <Text style={styles.removeBtnText}>⭐ {t("إزالة من المفضلة")}</Text>
                         </Pressable>
                       </View>
@@ -393,7 +484,7 @@ export default function AccountScreen() {
                       >
                         <Text style={[styles.removeBtnText, { color: "#22A652" }]}>✏️ {t("استكمال التحرير")}</Text>
                       </Pressable>
-                      <Pressable style={styles.removeBtn} onPress={() => removeDraft.mutate(d.id)}>
+                      <Pressable style={styles.removeBtn} onPress={() => setPendingRemoval({ kind: "draft", id: d.id })}>
                         <Text style={styles.removeBtnText}>🗑️ {t("حذف")}</Text>
                       </Pressable>
                     </View>
@@ -418,8 +509,8 @@ export default function AccountScreen() {
             multiline
             maxLength={150}
           />
-          <Pressable style={styles.bioSaveBtn} onPress={saveBio}>
-            <Text style={styles.bioSaveBtnText}>{t("حفظ")}</Text>
+          <Pressable style={styles.bioSaveBtn} onPress={() => { void saveBio(); }} disabled={bioSaving}>
+            {bioSaving ? <ActivityIndicator color="white" /> : <Text style={styles.bioSaveBtnText}>{t("حفظ")}</Text>}
           </Pressable>
         </View>
       </Modal>
@@ -450,8 +541,17 @@ export default function AccountScreen() {
       <AdActionSheet
         visible={!!adSheetTarget}
         ad={adSheetTarget}
-        pinnedCount={myAds.filter((a) => a.pinned).length}
+        pinnedCount={pinnedAdsCount}
         onClose={() => setAdSheetTarget(null)}
+      />
+      <ConfirmModal
+        visible={!!pendingRemoval}
+        title={removalCopy.title}
+        text={removalCopy.text}
+        confirmLabel={removalCopy.confirm}
+        danger
+        onCancel={() => setPendingRemoval(null)}
+        onConfirm={confirmRemoval}
       />
       <LiveActionSheet visible={!!liveSheetTarget} live={liveSheetTarget} onClose={() => setLiveSheetTarget(null)} />
     </View>
@@ -538,8 +638,15 @@ function createStyles(themeColors: ThemeColors) {
     adPurposeBadgeText: { color: "white", fontSize: 8.5, fontWeight: "900" },
     adPriceTag: { position: "absolute", bottom: 6, left: 6, right: 6, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 6, paddingVertical: 3, paddingHorizontal: 6 },
     adPriceTagText: { color: "white", fontSize: 9.5, fontWeight: "900", textAlign: "center" },
-    adMoreBtn: { position: "absolute", top: 6, left: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center" },
-    pinnedBadge: { position: "absolute", bottom: 6, right: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center" },
+    adMoreBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center" },
+    // نفس مسافات شبكة البحث وصفحة المعلن (حشو 14 وفاصل 10) — content هنا حشوه 16 فبنقلّله 2.
+    adsGrid: { gap: 10, marginHorizontal: -2 },
+    adsRow: { flexDirection: "row", gap: 10 },
+    pinHint: { fontSize: 11.5, color: themeColors.textSubtle, fontWeight: "700", marginBottom: 8, textAlign: "left" },
+    adStatusBadge: { borderRadius: 999, paddingVertical: 3, paddingHorizontal: 7, backgroundColor: "#D97706" },
+    adStatusBadgeRejected: { backgroundColor: "#B91C1C" },
+    adStatusBadgeText: { color: "white", fontSize: 8.5, fontWeight: "900" },
+    pinnedBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center" },
     publicBadge: { position: "absolute", top: 6, right: 6, backgroundColor: "#3b82f6", borderRadius: 999, paddingVertical: 2, paddingHorizontal: 6 },
     publicBadgeText: { color: "white", fontSize: 8.5, fontWeight: "900" },
     processingBadge: { position: "absolute", top: 6, left: 6, backgroundColor: "rgba(217,119,6,0.9)", borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 },

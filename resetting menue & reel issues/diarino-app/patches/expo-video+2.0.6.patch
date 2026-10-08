@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..865a2d4
 --- /dev/null
 +++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/PiPSessionFragment.kt
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,26 @@
 +package expo.modules.video
 +
 +import androidx.fragment.app.Fragment
@@ -19,6 +19,15 @@ index 0000000..865a2d4
 +    if (!isInPictureInPictureMode) {
 +      VideoView.exitPiPSession()
 +    }
++  }
++
++  // [diarino patch] While the PiP window is on screen the Activity is only PAUSED. It is STOPPED when the user
++  // dismisses the window with its close ("X") button (or the screen is turned off). A stop during a PiP session
++  // therefore means "closed": stop the playback and its audio, like YouTube does, instead of leaving the reel
++  // playing invisibly in the background. (Expanding the window resumes the Activity and never stops it.)
++  override fun onStop() {
++    super.onStop()
++    VideoView.pipSession?.playerView?.player?.pause()
 +  }
 +}
 diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/PictureInPictureHelperFragment.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/PictureInPictureHelperFragment.kt

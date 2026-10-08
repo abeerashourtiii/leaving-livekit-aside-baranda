@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import {
   View, Text, Pressable, StyleSheet, ActivityIndicator, Animated, Easing, Alert, Platform, useWindowDimensions,
 } from "react-native";
@@ -13,6 +13,7 @@ import { getAuthSnapshot, subscribeAuthState, useCurrentUser } from "../lib/hook
 import { supabase } from "../lib/supabase";
 import { useThemeColors, ThemeColors } from "../lib/hooks/useThemeColors";
 import { useLanguage } from "../lib/hooks/useLanguage";
+import { GUEST_PUBLISH_NOTICE } from "../lib/guestGate";
 
 const SKIP_KEY = "diarino:skip_auth";
 
@@ -25,6 +26,8 @@ const LOGIN_IMAGE_ASPECT = 704 / 1082;
 // بيتضافوا وقت الحساب.)
 const LOGIN_PANEL_CONTENT_HEIGHT = 12 + 44 * 3 + 10 * 3 + 36;
 const LOGIN_ERROR_LINE_HEIGHT = 30;
+// ↔ صندوق رسالة الضيف (سطرين + حشو + فاصل) — بيتحجز فى حساب ارتفاع الصورة عشان الأزرار ما تتقصّش.
+const LOGIN_NOTICE_HEIGHT = 64;
 
 function hasOAuthCallbackParams(): boolean {
   if (Platform.OS !== "web" || typeof window === "undefined") return false;
@@ -43,6 +46,9 @@ export default function AuthGateScreen() {
   const [signingInGuest, setSigningInGuest] = useState(false);
   const [isCompletingOAuth, setIsCompletingOAuth] = useState(hasOAuthCallbackParams);
   const [error, setError] = useState<string | null>(null);
+  // ↔ رسالة الضيف: لما ضيف يحاول ينشر عقار/يطلب عقار (lib/guestGate.ts) بيجي هنا
+  // بـ ?notice=guest_publish ونعرض إن لازم تسجيل دخول.
+  const { notice: noticeParam } = useLocalSearchParams<{ notice?: string }>();
   const { user: currentUser, loading: authLoading } = useCurrentUser();
   const themeColors = useThemeColors();
   // ↔ اللغة: t() بتترجم لو اللغة المحفوظة إنجليزي (وبتفضل عربي غير كده). هنا كمان
@@ -224,15 +230,16 @@ export default function AuthGateScreen() {
       signingIn={signingIn}
       signingInGuest={signingInGuest}
       error={error}
+      notice={noticeParam === GUEST_PUBLISH_NOTICE ? t("يجب تسجيل الدخول لنشر عقار أو طلب عقار") : null}
     />
   );
 }
 
 function LoginScreen({
-  onGoogle, onSkip, onEmailSignup, onEmailLogin, signingIn, signingInGuest, error,
+  onGoogle, onSkip, onEmailSignup, onEmailLogin, signingIn, signingInGuest, error, notice,
 }: {
   onGoogle: () => void; onSkip: () => void; onEmailSignup: () => void; onEmailLogin: () => void;
-  signingIn: boolean; signingInGuest: boolean; error: string | null;
+  signingIn: boolean; signingInGuest: boolean; error: string | null; notice: string | null;
 }) {
   const bgOpacity = useRef(new Animated.Value(0)).current;
   const themeColors = useThemeColors();
@@ -250,7 +257,7 @@ function LoginScreen({
   //     شريط أخضر على الجانبين بدل ما تتقصّ — والأزرار تفضل كاملة.
   // نفس الحساب على أندرويد/آيفون/ويب/APK.
   const panelBottomPad = Math.max(insets.bottom, 10) + 8;
-  const panelMin = LOGIN_PANEL_CONTENT_HEIGHT + panelBottomPad + (error ? LOGIN_ERROR_LINE_HEIGHT : 0);
+  const panelMin = LOGIN_PANEL_CONTENT_HEIGHT + panelBottomPad + (error ? LOGIN_ERROR_LINE_HEIGHT : 0) + (notice ? LOGIN_NOTICE_HEIGHT : 0);
   const imageHeight = Math.max(0, Math.min(winW / LOGIN_IMAGE_ASPECT, winH - panelMin));
 
   useEffect(() => {
@@ -276,6 +283,7 @@ function LoginScreen({
         style={[styles.panel, { paddingBottom: panelBottomPad }]}
       >
         <View style={styles.panelInner}>
+          {!!notice && <Text style={styles.noticeText}>{notice}</Text>}
           {!!error && <Text style={styles.errorText}>{t(error)}</Text>}
 
           <Pressable style={styles.googleBtn} onPress={onGoogle} disabled={busy}>
@@ -344,6 +352,10 @@ function createStyles(themeColors: ThemeColors) {
     // والأزرار ملزوقة فى آخره (فوق شريط تنقّل النظام عبر paddingBottom).
     panel: { flex: 1, paddingHorizontal: 18, paddingTop: 12, justifyContent: "flex-end", alignItems: "center" },
     panelInner: { width: "100%", maxWidth: 480, gap: 10 },
+    noticeText: {
+      color: "#FFF4D6", fontSize: 12.5, textAlign: "center", fontWeight: "800", lineHeight: 18,
+      backgroundColor: "rgba(32,38,24,0.55)", borderRadius: 12, paddingVertical: 8, paddingHorizontal: 14, overflow: "hidden",
+    },
     errorText: { color: "#FCA5A5", fontSize: 12, textAlign: "center", fontWeight: "700" },
     googleBtn: {
       flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,

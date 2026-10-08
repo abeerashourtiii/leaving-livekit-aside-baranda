@@ -430,7 +430,7 @@ export function AdPlaceholder({ onPress }: { onPress: () => void }) {
       accessibilityLabel={t("مساحة إعلانية")}
       style={{ width: "100%", aspectRatio: AD_PLACEHOLDER_ASPECT }}
     >
-      <Image source={language === "en" ? AD_PLACEHOLDER_IMAGE_EN : AD_PLACEHOLDER_IMAGE} style={StyleSheet.absoluteFill} contentFit="contain" transition={150} />
+      <Image source={language === "en" ? AD_PLACEHOLDER_IMAGE_EN : AD_PLACEHOLDER_IMAGE} style={StyleSheet.absoluteFill} contentFit="contain" transition={0} />
     </Pressable>
   );
 }

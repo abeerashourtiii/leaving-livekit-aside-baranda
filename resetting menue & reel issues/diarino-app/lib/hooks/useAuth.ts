@@ -208,6 +208,13 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
 
 export function translateEmailAuthError(raw: string): string {
   const m = raw.toLowerCase();
+  // ↔ أخطاء إرسال رسالة التفعيل (إعدادات SMTP فى Supabase — راجع docs/email-signup-setup.md)
+  if (m.includes("not authorized") || m.includes("email_address_not_authorized"))
+    return "تعذر إرسال رسالة التفعيل: خدمة البريد غير مُهيّأة لهذا العنوان بعد. تواصل مع الدعم.";
+  if (m.includes("error sending") || m.includes("sending confirmation") || m.includes("smtp"))
+    return "تعذر إرسال رسالة التفعيل الآن. حاول مرة أخرى بعد قليل أو تواصل مع الدعم.";
+  if (m.includes("email rate limit") || m.includes("over_email_send_rate_limit"))
+    return "تم إرسال عدد كبير من رسائل التفعيل. انتظر قليلًا ثم أعد المحاولة.";
   if (m.includes("already registered") || m.includes("already exists") || m.includes("user already registered"))
     return "هذا البريد الإلكتروني مسجّل بالفعل. جرّب تسجيل الدخول بدلاً من ذلك.";
   if (m.includes("invalid login credentials") || m.includes("invalid_credentials"))
@@ -227,19 +234,44 @@ export function translateEmailAuthError(raw: string): string {
 // supabase.auth.signUp العادي، ومحفّز public.handle_new_user (انظر
 // 20260722000002_create_profiles_table.sql) بيعمل صف profiles تلقائيًا
 // آخذ full_name من نفس user_metadata اللي بنبعتها هنا.
+// ↔ رابط التفعيل اللى بيتبعت فى الإيميل بيرجّع المستخدم لهنا بعد التأكيد:
+//   • الويب: <origin>/auth-callback (الشاشة بتكمّل الجلسة من الرابط)
+//   • أندرويد/آيفون/APK: <scheme>://auth-callback (deep link للتطبيق)
+// لازم العنوانين يتضافوا فى Supabase ← Authentication ← URL Configuration ←
+// Redirect URLs (docs/email-signup-setup.md)، وإلا Supabase بيرجّع لـ Site URL.
+export function getEmailConfirmRedirectUri(): string {
+  if (Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/auth-callback`;
+  }
+  return Linking.createURL("auth-callback");
+}
+
 export async function signUpWithEmail(
   email: string, password: string, fullName: string
-): Promise<{ error: string | null; needsEmailConfirmation: boolean }> {
+): Promise<{ error: string | null; needsEmailConfirmation: boolean; alreadyRegistered?: boolean }> {
   console.log("[Auth] Starting Email Sign-Up...");
   const { data, error } = await supabase.auth.signUp({
     email: email.trim(),
     password,
-    options: { data: { full_name: fullName.trim() } },
+    options: { data: { full_name: fullName.trim() }, emailRedirectTo: getEmailConfirmRedirectUri() },
   });
 
   if (error) {
     console.error("[Auth] Email Sign-Up Error:", error.message);
     return { error: translateEmailAuthError(error.message), needsEmailConfirmation: false };
+  }
+
+  // ↔ إصلاح: لما البريد مسجّل قبل كده (مثلًا دخل بجوجل بنفس الإيميل أو أنشأ حساب قبل
+  // كده) Supabase مبيرجّعش خطأ — بيرجّع "مستخدم" وهمى identities فيه فاضية ومبيبعتش أى
+  // إيميل (حماية من تخمين الحسابات). قبل كده التطبيق كان بيقول "أرسلنا رابط تفعيل" مع إن
+  // مفيش رسالة ولا حساب جديد اتعمل. دلوقتى بنكشفها ونوجّه المستخدم لتسجيل الدخول.
+  if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+    console.warn("[Auth] Email Sign-Up: email already registered (empty identities).");
+    return {
+      error: "هذا البريد الإلكتروني مسجّل بالفعل. سجّل الدخول بدلاً من إنشاء حساب جديد (أو استخدم تسجيل الدخول بجوجل إن كنت سجّلت به من قبل).",
+      needsEmailConfirmation: false,
+      alreadyRegistered: true,
+    };
   }
 
   // لو مشروع Supabase مفعّل فيه تأكيد البريد، بترجع من غير session فورية
@@ -249,14 +281,32 @@ export async function signUpWithEmail(
 }
 
 // ↔ تسجيل الدخول لحساب موجود بالفعل بالبريد وكلمة المرور، مستقل عن جوجل
-export async function signInWithEmailPassword(email: string, password: string): Promise<{ error: string | null }> {
+export async function signInWithEmailPassword(
+  email: string, password: string
+): Promise<{ error: string | null; notConfirmed?: boolean }> {
   console.log("[Auth] Starting Email Sign-In...");
   const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
   if (error) {
     console.error("[Auth] Email Sign-In Error:", error.message);
-    return { error: translateEmailAuthError(error.message) };
+    // ↔ الحساب اتعمل لكن البريد لسه ماتفعّلش ← الشاشة بتعرض زر "إعادة إرسال رابط التفعيل".
+    const notConfirmed = /not confirmed|email_not_confirmed/i.test(error.message);
+    return { error: translateEmailAuthError(error.message), notConfirmed };
   }
   console.log("[Auth] Email Sign-In Successful.");
+  return { error: null };
+}
+
+// ↔ إعادة إرسال رابط تفعيل البريد (لو الرسالة ماوصلتش أو انتهت صلاحية الرابط).
+export async function resendSignupConfirmation(email: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email: email.trim(),
+    options: { emailRedirectTo: getEmailConfirmRedirectUri() },
+  });
+  if (error) {
+    console.error("[Auth] Resend confirmation error:", error.message);
+    return { error: translateEmailAuthError(error.message) };
+  }
   return { error: null };
 }
 

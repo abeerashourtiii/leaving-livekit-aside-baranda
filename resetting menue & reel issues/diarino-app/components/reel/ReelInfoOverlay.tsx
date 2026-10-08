@@ -4,6 +4,7 @@ import Svg, { Circle, Path } from "react-native-svg";
 import { Property, fmtPrice } from "../../lib/types";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useReelControlsBottomOffset } from "../../lib/uiConstants";
+import { formatLocationLine } from "../../lib/formatLocation";
 
 // ↔ onLongPress here (not on the full-screen video Pressable in
 // ReelCard, which already owns long-press for the 2x-speed hold) opens
@@ -73,7 +74,7 @@ export function ReelInfoOverlay({
         </View>
 
         <Text style={[styles.title, { textAlign: isAr ? "right" : "left" }]} numberOfLines={1}>{p.shortTitle || p.title}</Text>
-        <Text style={[styles.location, { textAlign: isAr ? "right" : "left" }]}>📍 {p.location}</Text>
+        <Text style={[styles.location, { textAlign: isAr ? "right" : "left" }]}>📍 {formatLocationLine(p.province, p.location, t)}</Text>
         <Text style={[styles.price, { textAlign: isAr ? "right" : "left" }]}>
           {fmtPrice(p.price)} {t("ج.م")} {p.purpose === "rent" ? t("/ شهر") : ""}
         </Text>

@@ -11,6 +11,8 @@ export type Seller = {
   listings: number;
   followers: number;
   bio: string;
+  // ↔ صورة البروفايل (profiles_public.avatar_url) — الريلز/التفاصيل بتعرضها بدل الحرف الأول لو موجودة.
+  avatarUrl?: string | null;
   // ↔ الميزة الدولية لإدخال رقم الهاتف — E.164 كامل (مثل +201012345678)،
   // مش صيغة محلية. راجع lib/phone.ts للتحقق/التنسيق و
   // docs/PHONE_FEATURE_INTEGRATION_NOTES.md لتفاصيل الانتقال من الصيغة
@@ -65,6 +67,8 @@ export type Property = {
   likedByMe?: boolean;
   pinned?: boolean;
   pinnedAt?: number;
+  // ↔ حالة مراجعة الأدمن (properties.moderation_status): الإعلان الجديد 'pending' ويشوفه صاحبه فقط فى «إعلاناتي» لحد الموافقة.
+  moderationStatus?: "pending" | "approved" | "rejected";
   // ↔ "وسّع انتشار إعلانك" — platforms the owner asked to also have this
   // listing reposted to (youtube/facebook/tiktok/instagram), reviewed
   // alongside the reel itself in the admin reels screen.

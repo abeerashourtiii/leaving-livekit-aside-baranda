@@ -1,9 +1,11 @@
 import { View, Text, Pressable, StyleSheet } from "react-native";
+import { Image } from "expo-image";
 import Svg, { Path, Circle } from "react-native-svg";
 import { Seller } from "../../lib/types";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useReelControlsBottomOffset } from "../../lib/uiConstants";
 import { physicalSide } from "../../lib/rtl";
+import { cldThumbnail } from "../../lib/cloudinary";
 
 // ↔ .reel-side-actions. Side is now explicitly tied to the selected app
 // language (not the device's forced RTL flag): profile/like/share/save sit
@@ -66,13 +68,17 @@ function FollowGlyph({ following }: { following: boolean }) {
   );
 }
 
-// ↔ getSellerAvatarHtml() — for now only the "not me" branch (gradient +
-// initial); the "me with custom avatar" branch comes back once account/
-// profile photo upload is ported.
+// ↔ getSellerAvatarHtml() — صورة البائع (profiles_public.avatar_url) لو موجودة،
+// وإلا الحرف الأول. بتتحدّث فورًا لما صاحب الحساب يغيّر صورته (useProfile.update
+// بيعمل invalidate لـ ["properties"]).
 function SellerAvatar({ seller, size = 38 }: { seller: Seller; size?: number }) {
   return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={{ color: "white", fontWeight: "900", fontSize: Math.floor(size * 0.45) }}>{seller.initial}</Text>
+    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, overflow: "hidden" }]}>
+      {seller.avatarUrl ? (
+        <Image source={{ uri: cldThumbnail(seller.avatarUrl) }} style={{ width: "100%", height: "100%" }} contentFit="cover" transition={150} />
+      ) : (
+        <Text style={{ color: "white", fontWeight: "900", fontSize: Math.floor(size * 0.45) }}>{seller.initial}</Text>
+      )}
     </View>
   );
 }
