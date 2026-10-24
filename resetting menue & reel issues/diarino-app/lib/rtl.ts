@@ -22,3 +22,16 @@ export function physicalSide(wantLeftVisually: boolean): "left" | "right" {
   const useLeftProp = wantLeftVisually !== nativeWillAutoSwap; // XOR
   return useLeftProp ? "left" : "right";
 }
+
+// ↔ اتجاه صف (flexDirection) بحيث *أول عنصر* فى الصف يقع على الجهة المرئية المطلوبة ("left" | "right")،
+// على كل المنصات: على أندرويد/آيفون/APK لما I18nManager.isRTL شغّالة (العربى) الـ row بيبدأ من اليمين
+// تلقائيًا، وعلى الويب (من غير قلب تلقائى) بيبدأ من الشمال. نفس منطق physicalSide() لكن للـ flex row.
+export function rowStartingAt(side: "left" | "right"): "row" | "row-reverse" {
+  const naturalStartIsRight = Platform.OS !== "web" && I18nManager.isRTL;
+  return (side === "right") === naturalStartIsRight ? "row" : "row-reverse";
+}
+
+// ↔ جهة أزرار الشريط العلوى (الجرس ثم الفلتر) حسب لغة التطبيق: العربية → أعلى اليمين، الإنجليزية → أعلى الشمال.
+export function topActionsSide(language: "ar" | "en"): "left" | "right" {
+  return language === "ar" ? "right" : "left";
+}

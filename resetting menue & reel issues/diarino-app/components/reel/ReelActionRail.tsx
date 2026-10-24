@@ -11,7 +11,7 @@ import { cldThumbnail } from "../../lib/cloudinary";
 // language (not the device's forced RTL flag): profile/like/share/save sit
 // on the LEFT in Arabic and the RIGHT in English, mirrored by
 // ReelInfoOverlay's price/details block doing the opposite on the same
-// screen. Buttons top-to-bottom: seller avatar+follow, like, share, save,
+// screen. Buttons top-to-bottom: seller avatar+follow, like, comments, share, save,
 // compare.
 //
 // ↔ #6: شُرط البحث الجانبي (اللي كان فوق أيقونة البروفايل) اتحذف نهائيًا —
@@ -22,6 +22,15 @@ function HeartIcon({ filled }: { filled: boolean }) {
   return (
     <Svg width={26} height={26} viewBox="0 0 24 24" fill={filled ? "#ef4444" : "none"} stroke="white" strokeWidth={2}>
       <Path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.6l-1-1a5.5 5.5 0 00-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 000-7.8z" />
+    </Svg>
+  );
+}
+
+// ↔ أيقونة التعليقات (فقاعة كلام) — بين الإعجاب والمشاركة.
+function CommentIcon() {
+  return (
+    <Svg width={25} height={25} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z" />
     </Svg>
   );
 }
@@ -86,6 +95,7 @@ function SellerAvatar({ seller, size = 38 }: { seller: Seller; size?: number }) 
 type Props = {
   seller: Seller;
   likes: number;
+  comments: number;
   liked: boolean;
   saved: boolean;
   following: boolean;
@@ -93,14 +103,15 @@ type Props = {
   onOpenSeller: () => void;
   onToggleFollow: () => void;
   onToggleLike: () => void;
+  onOpenComments: () => void;
   onShare: () => void;
   onToggleSave: () => void;
   onToggleCompare: () => void;
 };
 
 export function ReelActionRail({
-  seller, likes, liked, saved, following, comparing,
-  onOpenSeller, onToggleFollow, onToggleLike, onShare, onToggleSave, onToggleCompare,
+  seller, likes, comments, liked, saved, following, comparing,
+  onOpenSeller, onToggleFollow, onToggleLike, onOpenComments, onShare, onToggleSave, onToggleCompare,
 }: Props) {
   const { language } = useLanguage();
   const isAr = language !== "en";
@@ -129,6 +140,11 @@ export function ReelActionRail({
       <Pressable style={styles.actionBtn} onPress={onToggleLike} hitSlop={8}>
         <HeartIcon filled={liked} />
         <Text style={styles.actionLabel}>{likes}</Text>
+      </Pressable>
+
+      <Pressable style={styles.actionBtn} onPress={onOpenComments} hitSlop={8} accessibilityRole="button" accessibilityLabel="التعليقات">
+        <CommentIcon />
+        <Text style={styles.actionLabel}>{comments}</Text>
       </Pressable>
 
       <Pressable style={styles.actionBtn} onPress={onShare} hitSlop={8}>

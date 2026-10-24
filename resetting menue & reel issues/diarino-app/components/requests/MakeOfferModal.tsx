@@ -1,21 +1,25 @@
 import { useState } from "react";
 import { Modal, View, Text, TextInput, Pressable, StyleSheet, Animated } from "react-native";
 import { PropertyRequest } from "../../data/mock-requests";
-import { fmtPrice } from "../../lib/types";
+import { fmtPrice, Property } from "../../lib/types";
 import { PhoneInput, PhoneInputValue } from "../shared/PhoneInput";
 import { validateAndFormatPhone } from "../../lib/phone";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 import { useDragToClose } from "../../lib/hooks/useDragToClose";
 
+// ↔ نفس النافذة بتخدم حالتين: تقديم عرض على «طلب» (request — صفحة الطلبات) أو على «إعلان عقار» (property — صفحة التفاصيل،
+//   أيقونة بجوار زر الاتصال). الحقول واحدة (رسالة + سعر مقترح اختيارى + واتساب)، والملخص بيتغيّر حسب المصدر.
 type Props = {
   visible: boolean;
-  request: PropertyRequest | null;
+  request?: PropertyRequest | null;
+  property?: Property | null;
   onClose: () => void;
   onSubmit: (message: string, price: string, whatsapp: string) => void;
+  submitting?: boolean;
 };
 
-export function MakeOfferModal({ visible, request, onClose, onSubmit }: Props) {
+export function MakeOfferModal({ visible, request = null, property = null, onClose, onSubmit, submitting = false }: Props) {
   const { t } = useLanguage();
   const [message, setMessage] = useState("");
   const [price, setPrice] = useState("");
@@ -31,16 +35,20 @@ export function MakeOfferModal({ visible, request, onClose, onSubmit }: Props) {
   }
 
   function submit() {
-    // ↔ submitOffer() validation: message required, whatsapp required &
-    // valid per the selected country (كانت مصر بس قبل الميزة الدولية).
+    // ↔ الرسالة مطلوبة. رقم الواتساب **اختيارى** (طلب المستخدم): ممكن يكمّل المحادثة داخل التطبيق من صفحة «العروض» من غير رقم.
+    //   لو كتب رقم لازم يكون صحيح حسب الدولة المختارة (E.164)، ولو سابه فاضي بنبعت "" والخادم بيحوّلها null.
     if (!message.trim()) { setMessageError(true); return; }
-    const result = whatsapp.countryIso2 ? validateAndFormatPhone(whatsapp.localNumber, whatsapp.countryIso2) : { valid: false as const, reason: "" };
-    if (!result.valid) { setWhatsappError(true); return; }
-    onSubmit(message.trim(), price.trim(), result.e164);
+    let e164 = "";
+    if (whatsapp.localNumber.trim()) {
+      const result = whatsapp.countryIso2 ? validateAndFormatPhone(whatsapp.localNumber, whatsapp.countryIso2) : { valid: false as const, reason: "" };
+      if (!result.valid) { setWhatsappError(true); return; }
+      e164 = result.e164;
+    }
+    onSubmit(message.trim(), price.trim(), e164);
     reset();
   }
 
-  if (!request) return null;
+  if (!request && !property) return null;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -50,10 +58,18 @@ export function MakeOfferModal({ visible, request, onClose, onSubmit }: Props) {
       <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]} {...panHandlers}>
         <View style={styles.dragHandle} />
         <Text style={styles.title}>{t("تقديم عرض")}</Text>
-        <Text style={styles.summary}>
-          <Text style={{ fontWeight: "900" }}>{t(request.type)} {request.purpose === "sale" ? t("للبيع") : t("للإيجار")}</Text>
-          {" · "}{request.province} · {request.location}{"\n"}طلب من: {request.requesterName}
-        </Text>
+        {request ? (
+          <Text style={styles.summary}>
+            <Text style={{ fontWeight: "900" }}>{t(request.type)} {request.purpose === "sale" ? t("للبيع") : t("للإيجار")}</Text>
+            {" · "}{request.province} · {request.location}{"\n"}طلب من: {request.requesterName}
+          </Text>
+        ) : property ? (
+          <Text style={styles.summary}>
+            <Text style={{ fontWeight: "900" }}>{t(property.type)} {property.purpose === "sale" ? t("للبيع") : t("للإيجار")}</Text>
+            {" · "}{property.province} · {property.location}{"\n"}{t("السعر المطلوب")}: {fmtPrice(property.price)} {t("ج.م")}
+          </Text>
+        ) : null}
+        <Text style={styles.privacyNote}>{request ? t("يصل عرضك لصاحب الطلب فقط في محادثة خاصة.") : t("يصل عرضك لصاحب الإعلان فقط في محادثة خاصة.")}</Text>
 
         <Text style={styles.label}>{t("رسالتك")}</Text>
         <TextInput
@@ -72,21 +88,22 @@ export function MakeOfferModal({ visible, request, onClose, onSubmit }: Props) {
           style={styles.input}
           value={price}
           onChangeText={setPrice}
-          placeholder="3800000"
+          placeholder={property ? String(property.price) : "3800000"}
           placeholderTextColor={themeColors.textSubtle}
           keyboardType="number-pad"
         />
         {!!price && <Text style={styles.pricePreview}>{fmtPrice(Number(price) || 0)} ج.م</Text>}
 
-        <Text style={styles.label}>{t("رقم واتساب للتواصل")}</Text>
+        <Text style={styles.label}>{t("رقم واتساب للتواصل")} {t("(اختياري)")}</Text>
         <PhoneInput
           value={whatsapp}
           onChange={(v) => { setWhatsapp(v); setWhatsappError(false); }}
           error={whatsappError}
         />
         {whatsappError && <Text style={styles.errorText}>{t("ادخل رقم واتساب صحيح")}</Text>}
+        <Text style={styles.optionalNote}>{t("الرقم اختياري: يمكنك المتابعة بالمحادثة داخل التطبيق من صفحة «العروض» (الأيقونة بجوار جرس الإشعارات) دون كتابة أي رقم. وإن كتبته فسيراه الطرف الآخر.")}</Text>
 
-        <Pressable style={styles.submitBtn} onPress={submit}>
+        <Pressable style={[styles.submitBtn, submitting && { opacity: 0.6 }]} onPress={submit} disabled={submitting}>
           <Text style={styles.submitBtnText}>{t("إرسال العرض")}</Text>
         </Pressable>
       </Animated.View>
@@ -101,6 +118,8 @@ function createStyles(themeColors: ThemeColors) {
     dragHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: themeColors.border, alignSelf: "center", marginBottom: 12 },
     title: { fontSize: 15, fontWeight: "900", color: themeColors.text, marginBottom: 8 },
     summary: { fontSize: 12, color: themeColors.textSubtle, lineHeight: 19, marginBottom: 16 },
+    optionalNote: { fontSize: 11, color: themeColors.textSubtle, lineHeight: 17, marginTop: 6 },
+    privacyNote: { fontSize: 11, color: themeColors.textSubtle, lineHeight: 17, marginTop: -8, marginBottom: 8 },
     label: { fontSize: 11.5, fontWeight: "800", color: themeColors.textMuted, marginBottom: 6, marginTop: 10 },
     input: { backgroundColor: themeColors.surface, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 12, fontSize: 13, color: themeColors.text },
     textarea: { backgroundColor: themeColors.surface, borderRadius: 10, padding: 12, fontSize: 13, color: themeColors.text, minHeight: 90, textAlignVertical: "top" },

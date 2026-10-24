@@ -24,13 +24,19 @@ type Props = Omit<PressableProps, "style" | "children"> & {
   index?: number;
   topStart?: ReactNode;
   bottomStart?: ReactNode;
+  // ↔ رسالة حالة تحت بيانات الإعلان (مثلًا «قيد المراجعة: سيظهر للجميع بعد موافقة الإدارة» أو سبب الرفض) — pending/rejected.
+  note?: { text: string; tone: "pending" | "rejected" | "info" };
 };
 
-export const AdGridCard = memo(function AdGridCard({ item, index = 0, topStart, bottomStart, ...pressableProps }: Props) {
+export const AdGridCard = memo(function AdGridCard({ item, index = 0, topStart, bottomStart, note, ...pressableProps }: Props) {
   const { t } = useLanguage();
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
   const thumbnailUrl = cardThumbnailUrl(item);
+  // ↔ إعلان مُغلق بصفقة: الشارة تكتب «تم البيع» أو «تم الإيجار» بدل «بيع/إيجار» (ويبقى الكارت فى إدارة الحساب وصفحة المعلن).
+  const closed = item.closedType;
+  const badgeText = closed ? (closed === "rented" ? t("تم الإيجار") : t("تم البيع")) : item.purpose === "sale" ? t("بيع") : t("إيجار");
+  const badgeColor = closed ? "#B91C1C" : item.purpose === "sale" ? "#22A652" : "#F4673F";
   return (
     <Pressable style={styles.card} {...pressableProps}>
       <View style={styles.media}>
@@ -39,14 +45,25 @@ export const AdGridCard = memo(function AdGridCard({ item, index = 0, topStart, 
         ) : (
           <ReelBackground index={index} type={item.type} />
         )}
-        <View style={[styles.purposeBadge, { backgroundColor: item.purpose === "sale" ? "#22A652" : "#F4673F" }]}>
-          <Text style={styles.purposeBadgeText}>{item.purpose === "sale" ? t("بيع") : t("إيجار")}</Text>
+        {!!closed && <View style={styles.closedOverlay} pointerEvents="none" />}
+        <View style={[styles.purposeBadge, { backgroundColor: badgeColor }]}>
+          <Text style={styles.purposeBadgeText}>{badgeText}</Text>
         </View>
         {!!topStart && <View style={styles.topStart}>{topStart}</View>}
         {!!bottomStart && <View style={styles.bottomStart}>{bottomStart}</View>}
       </View>
       <View style={styles.info}>
-        <Text style={styles.type}>{t(item.type)}</Text>
+        {/* ↔ عنوان الإعلان بدل نوع العقار (شقة/فيلا...): سطر واحد بخط يصغر تلقائيًا ليكفى العنوان داخل الكارت (فى الصفحات التلاتة:
+            البحث، صفحة المعلن، إعلاناتى — لأن الكارت مصدر واحد). لو مفيش عنوان نرجع لنوع العقار. */}
+        <Text
+          style={styles.title}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+          adjustsFontSizeToFit
+          minimumFontScale={0.72}
+        >
+          {item.shortTitle?.trim() || item.title?.trim() || t(item.type)}
+        </Text>
         <Text style={styles.price}>{fmtPrice(item.price)} {t("ج.م")} {item.purpose === "rent" ? t("/ شهر") : ""}</Text>
         <Text style={styles.location} numberOfLines={1}>📍 {formatLocationLine(item.province, item.location, t)}</Text>
         <View style={styles.metaRow}>
@@ -54,6 +71,11 @@ export const AdGridCard = memo(function AdGridCard({ item, index = 0, topStart, 
           <Text style={styles.meta}>📐 {item.area} {t("م²")}</Text>
         </View>
       </View>
+      {!!note && (
+        <View style={[styles.note, note.tone === "rejected" ? styles.noteRejected : note.tone === "info" ? styles.noteInfo : styles.notePending]}>
+          <Text style={[styles.noteText, note.tone === "rejected" ? styles.noteTextRejected : note.tone === "info" ? styles.noteTextInfo : styles.noteTextPending]}>{note.text}</Text>
+        </View>
+      )}
     </Pressable>
   );
 });
@@ -62,12 +84,21 @@ function createStyles(themeColors: ThemeColors) {
   return StyleSheet.create({
     card: { flex: 1, backgroundColor: themeColors.card, borderRadius: 14, overflow: "hidden" },
     media: { height: AD_CARD_MEDIA_HEIGHT, position: "relative" },
+    closedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.28)" },
     purposeBadge: { position: "absolute", top: 8, right: 8, borderRadius: 999, paddingVertical: 3, paddingHorizontal: 8 },
     purposeBadgeText: { color: "white", fontSize: 9.5, fontWeight: "900" },
     topStart: { position: "absolute", top: 8, left: 8, flexDirection: "row", gap: 6 },
     bottomStart: { position: "absolute", bottom: 8, left: 8, flexDirection: "row", alignItems: "center", gap: 6 },
     info: { padding: 10 },
-    type: { fontSize: 10.5, fontWeight: "800", color: themeColors.textSubtle, marginBottom: 3 },
+    note: { paddingHorizontal: 10, paddingVertical: 7 },
+    notePending: { backgroundColor: themeColors.isDark ? "rgba(217,119,6,0.22)" : "#FEF3C7" },
+    noteRejected: { backgroundColor: themeColors.isDark ? "rgba(220,38,38,0.22)" : "#FEE2E2" },
+    noteInfo: { backgroundColor: themeColors.isDark ? "rgba(34,166,82,0.20)" : "#DCFCE7" },
+    noteTextInfo: { color: themeColors.isDark ? "#86EFAC" : "#166534" },
+    noteText: { fontSize: 10.5, fontWeight: "800", lineHeight: 16 },
+    noteTextPending: { color: themeColors.isDark ? "#FCD34D" : "#92400E" },
+    noteTextRejected: { color: themeColors.isDark ? "#FCA5A5" : "#991B1B" },
+    title: { fontSize: 12.5, fontWeight: "800", color: themeColors.text, marginBottom: 3 },
     price: { fontSize: 13.5, fontWeight: "900", color: "#22A652", marginBottom: 4 },
     location: { fontSize: 10.5, color: themeColors.textSubtle, marginBottom: 6 },
     metaRow: { flexDirection: "row", gap: 8 },

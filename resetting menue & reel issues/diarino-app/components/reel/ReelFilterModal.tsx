@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChipLabel } from "../shared/ChipLabel";
 import {
   Modal, View, Text, TextInput, Pressable, ScrollView, StyleSheet,
   Animated, PanResponder,
@@ -29,6 +30,14 @@ export function ReelFilterModal({ visible, value, onApply, onClose }: Props) {
   const [provinces, setProvinces] = useState<string[]>(value.provinces);
   const [regions, setRegions] = useState<string[]>(value.regions);
   const [query, setQuery] = useState("");
+  // ↔ مزامنة الاختيار مع الفلتر الفعلى كل ما النافذة تتفتح: الفلتر ممكن يتلغى من بره (زر ✕ تحت الأيقونات، أو إعادة التعيين
+  // التلقائية عند الخروج من التطبيق) والنافذة فاضلة mounted، فكانت بتعرض اختيارات قديمة.
+  useEffect(() => {
+    if (!visible) return;
+    setProvinces(value.provinces);
+    setRegions(value.regions);
+    setQuery("");
+  }, [visible, value]);
 
   const translateY = useRef(new Animated.Value(0)).current;
   const backdropOpacity = useRef(new Animated.Value(1)).current;
@@ -132,7 +141,7 @@ export function ReelFilterModal({ visible, value, onApply, onClose }: Props) {
         <View style={styles.chipsRow}>
           {provinces.map((pv) => (
             <Pressable key={pv} style={styles.chipActive} onPress={() => removeProvince(pv)}>
-              <Text style={styles.chipActiveText}>{t(pv)} ×</Text>
+              <ChipLabel text={`${t(pv)} ×`} active textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
             </Pressable>
           ))}
         </View>
@@ -146,7 +155,7 @@ export function ReelFilterModal({ visible, value, onApply, onClose }: Props) {
                   style={regions.length === 0 ? styles.chipActive : styles.chip}
                   onPress={() => setRegions([])}
                 >
-                  <Text style={regions.length === 0 ? styles.chipActiveText : styles.chipText}>{t("الكل")}</Text>
+                  <ChipLabel text={t("الكل")} active={regions.length === 0} textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
                 </Pressable>
                 {availableRegions.map((r) => (
                   <Pressable
@@ -154,7 +163,7 @@ export function ReelFilterModal({ visible, value, onApply, onClose }: Props) {
                     style={regions.includes(r) ? styles.chipActive : styles.chip}
                     onPress={() => toggleRegion(r)}
                   >
-                    <Text style={regions.includes(r) ? styles.chipActiveText : styles.chipText}>{t(r)}</Text>
+                    <ChipLabel text={t(r)} active={regions.includes(r)} textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
                   </Pressable>
                 ))}
               </View>

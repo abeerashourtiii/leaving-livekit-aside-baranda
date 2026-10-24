@@ -27,21 +27,24 @@ function rowToBanner(r: BannerRow): AdBanner {
 
 // ↔ the menu page's rotating carousel — only banners that are active AND
 // within their run dates (a duration set by the admin, per the request).
+// ↔ مفصولة عشان useMenuPrewarm يقدر يجلبها مسبقًا (قبل ما المستخدم يفتح صفحة القائمة).
+export async function fetchActiveAdBanners(): Promise<AdBanner[]> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from("ad_banners")
+    .select("id, title, image_url, link_url, whatsapp_message, start_date, end_date, active, sort_order, created_at")
+    .eq("active", true)
+    .lte("start_date", today)
+    .or(`end_date.is.null,end_date.gte.${today}`)
+    .order("sort_order", { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as BannerRow[]).map(rowToBanner);
+}
+
 export function useActiveAdBanners() {
   return useQuery({
     queryKey: ["adBanners", "active"],
-    queryFn: async (): Promise<AdBanner[]> => {
-      const today = new Date().toISOString().slice(0, 10);
-      const { data, error } = await supabase
-        .from("ad_banners")
-        .select("id, title, image_url, link_url, whatsapp_message, start_date, end_date, active, sort_order, created_at")
-        .eq("active", true)
-        .lte("start_date", today)
-        .or(`end_date.is.null,end_date.gte.${today}`)
-        .order("sort_order", { ascending: true });
-      if (error) throw error;
-      return ((data ?? []) as BannerRow[]).map(rowToBanner);
-    },
+    queryFn: fetchActiveAdBanners,
     staleTime: 60_000,
   });
 }

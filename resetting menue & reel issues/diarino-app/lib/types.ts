@@ -54,6 +54,8 @@ export type Property = {
   saves: number;
   views: number;
   chats: number;
+  // ↔ عدّاد التعليقات (تعليقات + ردود) — properties.comment_count (20261013000000_reel_comments.sql).
+  comments?: number;
   createdAt: number;
   media: MediaItem[];
   coverImage: string | null;
@@ -67,8 +69,14 @@ export type Property = {
   likedByMe?: boolean;
   pinned?: boolean;
   pinnedAt?: number;
-  // ↔ حالة مراجعة الأدمن (properties.moderation_status): الإعلان الجديد 'pending' ويشوفه صاحبه فقط فى «إعلاناتي» لحد الموافقة.
+  // ↔ حالة مراجعة الأدمن (properties.moderation_status): الإعلان الجديد 'pending' صار الافتراضي approved (النشر فورى)؛ pending/rejected يظهران لصاحبه والأدمن فقط.
   moderationStatus?: "pending" | "approved" | "rejected";
+  // ↔ سبب رفض الأدمن (يظهر للمعلن على كارت إعلانه).
+  moderationReason?: string;
+  // ↔ وقت أول نشر (ms) — بداية نافذة الـ 24 ساعة للتعديل والحذف (lib/adWindow.ts).
+  publishedAt?: number;
+  // ↔ الإعلان المُغلق بصفقة (تم البيع / تم الإيجار) — يظهر لصاحبه فقط، ويختفى عن الجميع بسياسة RLS.
+  closedType?: "sold" | "rented";
   // ↔ "وسّع انتشار إعلانك" — platforms the owner asked to also have this
   // listing reposted to (youtube/facebook/tiktok/instagram), reviewed
   // alongside the reel itself in the admin reels screen.

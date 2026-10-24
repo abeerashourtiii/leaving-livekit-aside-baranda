@@ -26,12 +26,16 @@ function relativeTimeAr(iso: string): string {
   return new Date(iso).toLocaleDateString("ar-EG");
 }
 
-type DbCategory = "like" | "save" | "follow" | "chat" | "new_match" | "price_drop";
+type DbCategory = "like" | "save" | "follow" | "chat" | "new_match" | "price_drop" | "comment" | "offer" | "approval";
 // ↔ 'new_match' and 'price_drop' (20260820000000_smart_alerts.sql) are
 // two distinct triggers/DB categories but share one UI tab ("التنبيهات")
 // instead of getting a 5th and 6th tab each — dbCatToUiCat below is the
 // only place that mapping happens.
 function dbCatToUiCat(c: DbCategory): NotifCategory {
+  // ↔ 'comment' (تعليق/رد على ريلك أو تعليقك — 20261013000000_reel_comments.sql) بيظهر مع إشعارات المحادثة (أيقونة الفقاعة).
+  // 'approval' = قرار الأدمن على إعلانك (موافقة/رفض/حذف) — بيظهر فى الجرس مع «التنبيهات».
+  if (c === "approval") return "alert";
+  if (c === "comment" || c === "offer") return "chat"; // 'offer' = عرض جديد/رد على عرض (20261016000000_property_offers.sql)
   return c === "new_match" || c === "price_drop" ? "alert" : c;
 }
 
@@ -59,6 +63,9 @@ async function fetchNotifications(userId: string): Promise<Record<NotifCategory,
     // 20260825000000_profile_privacy_rls.sql.
     .select("id, category, text, read, created_at, property_id, chat_id, actor:profiles_public!actor_id(id, full_name), properties(seller_id)")
     .eq("recipient_id", userId)
+    // ↔ إشعارات المحادثات/العروض (category = chat | offer) منفصلة عن الجرس: بتظهر كنقطة حمراء على أيقونة «العروض» وفى صفحة
+    // العروض (lib/hooks/useOffersHub.ts). الجرس فيه الإعجابات والحفظ والمتابعة والتعليقات والردود وتنبيهات البحث.
+    .not("category", "in", "(chat,offer)")
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) throw error;
@@ -74,12 +81,20 @@ async function fetchNotifications(userId: string): Promise<Record<NotifCategory,
       initial: name.charAt(0),
       text: r.text,
       time: relativeTimeAr(r.created_at),
+      createdAt: r.created_at,
+      category: dbCatToUiCat(r.category),
       read: r.read,
       action:
         r.category === "chat" && r.chat_id
           ? { type: "chat", id: r.chat_id }
           : (r.category === "like" || r.category === "save") && r.property_id
           ? { type: "reel", sellerId: r.properties?.seller_id ?? "", propertyId: r.property_id }
+          : r.category === "approval" && r.property_id
+          ? { type: "reel", sellerId: r.properties?.seller_id ?? "", propertyId: r.property_id }
+          : r.category === "offer"
+          ? { type: "offers" }
+          : r.category === "comment" && r.property_id
+          ? { type: "reel", sellerId: r.properties?.seller_id ?? "", propertyId: r.property_id, comments: true }
           : r.category === "follow" && r.actor?.id
           ? { type: "seller", id: r.actor.id }
           : (r.category === "new_match" || r.category === "price_drop") && r.property_id
@@ -129,7 +144,13 @@ export function useNotifications() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "notifications", filter: `recipient_id=eq.${user.id}` },
-        () => qc.invalidateQueries({ queryKey })
+        (payload) => {
+          void qc.invalidateQueries({ queryKey });
+          // ↔ قرار الأدمن على إعلانى (موافقة/رفض): نحدّث «إعلاناتي» فورًا فتختفى كلمة «قيد المراجعة» من الكارت من غير إعادة فتح الصفحة.
+          if ((payload.new as { category?: string } | undefined)?.category === "approval") {
+            void qc.invalidateQueries({ queryKey: ["properties"] });
+          }
+        }
       )
       .subscribe();
     return () => {
@@ -137,17 +158,35 @@ export function useNotifications() {
     };
   }, [user?.id, qc, queryKey]);
 
+  // ↔ فتح إشعار = تسجيله مقروء. الكتابة المباشرة على الجدول ما بقتش مسموحة (RLS: 20260822000000 شالت سياسة
+  // UPDATE)، فبننده الدالة mark_notification_read (20261008000001) — بتغيّر read لإشعار المستخدم نفسه بس.
+  // التحديث متفائل: النقطة الخضرا والعدّاد يختفوا فورًا، وبعدها إعادة الجلب بتأكّد من الخادم.
   const markReadMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("notifications").update({ read: true }).eq("id", id);
+      const { error } = await supabase.rpc("mark_notification_read", { p_id: id });
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey }),
+    onMutate: async (id: string) => {
+      await qc.cancelQueries({ queryKey });
+      const previous = qc.getQueryData<Record<NotifCategory, NotifItem[]>>(queryKey);
+      if (previous) {
+        const next = { ...previous };
+        for (const cat of CATS) next[cat] = previous[cat].map((n) => (n.id === id ? { ...n, read: true } : n));
+        qc.setQueryData(queryKey, next);
+      }
+      return { previous };
+    },
+    onError: (err) => {
+      console.warn("mark notification read failed:", err);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey }),
   });
 
   const markAllReadMutation = useMutation({
-    mutationFn: async ({ category }: { userId: string; category: NotifCategory }) => {
-      const dbCategories: DbCategory[] = category === "alert" ? ["new_match", "price_drop"] : [category];
+    mutationFn: async (_: { userId: string }) => {
+      // ↔ القائمة موحّدة (كل الفئات فى صفحة واحدة)، فـ«تحديد الكل» بيشمل كل الفئات.
+      // ↔ بدون chat/offer: دول بتخص صفحة العروض ومش بيتعلّموا مقروءين من الجرس.
+      const dbCategories: DbCategory[] = ["like", "save", "follow", "new_match", "price_drop", "comment", "approval"];
       const { error } = await supabase.rpc("mark_notifications_read", { p_categories: dbCategories });
       if (error) throw error;
     },
@@ -166,9 +205,15 @@ export function useNotifications() {
     alert: data.alert.filter((n) => !n.read).length,
   };
   const totalUnread = CATS.reduce((sum, c) => sum + badges[c], 0);
-  const list = data[uiState.activeCat] || [];
-  
-  const visibleItems = list.filter((n) => {
+  // ↔ قائمة موحّدة: كل الإشعارات (إعجاب/حفظ/متابعة/شات/تنبيهات) فى قائمة واحدة، الأحدث فى الأعلى.
+  // التجميع بالتاريخ (اليوم / أمس / التاريخ) بيتم فى NotificationsDropdown من createdAt.
+  const allItems = useMemo(() => {
+    const merged = CATS.flatMap((c) => data[c]);
+    const ts = (n: NotifItem) => (n.createdAt ? new Date(n.createdAt).getTime() : Date.now());
+    return merged.sort((a, b) => ts(b) - ts(a));
+  }, [data]);
+
+  const visibleItems = allItems.filter((n) => {
     if (uiState.filter === "unread") return !n.read;
     if (uiState.filter === "read") return n.read;
     return true;
@@ -182,7 +227,7 @@ export function useNotifications() {
 
   function markAllRead() {
     if (!user?.id) return;
-    markAllReadMutation.mutate({ userId: user.id, category: uiState.activeCat });
+    markAllReadMutation.mutate({ userId: user.id });
   }
 
   return {

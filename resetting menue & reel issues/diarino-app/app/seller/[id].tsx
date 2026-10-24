@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo, useState } from "react";
+import { ACCOUNT_TYPE_LABELS } from "../../lib/accountTypes";
 import { router, useLocalSearchParams } from "expo-router";
-import { View, Text, ScrollView, Pressable, StyleSheet, FlatList, Alert, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, StyleSheet, FlatList, ActivityIndicator } from "react-native";
 import { Image } from "expo-image";
 import Svg, { Path } from "react-native-svg";
 import { MAX_PINNED_PROPERTIES, useMyProperties } from "../../lib/hooks/useProperties";
@@ -10,7 +11,6 @@ import { AdGridCard } from "../../components/property/AdGridCard";
 import { properties as demoProperties } from "../../data/mock-properties";
 import { Property, Seller } from "../../lib/types";
 import { cldThumbnail } from "../../lib/cloudinary";
-import { openOrCreateChat } from "../../lib/hooks/useChatsDB";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useFollows, useFollowerCount } from "../../lib/hooks/useFollows";
@@ -240,6 +240,11 @@ export default function SellerProfileScreen() {
               <Text style={styles.name}>{t(seller.name)}</Text>
               {seller.verified && <Text style={{ color: "#22A652", fontSize: 15 }}>✓</Text>}
             </View>
+            {!!publicProfile?.accountType && (
+              <View style={styles.accountTypeChip}>
+                <Text style={styles.accountTypeText}>{t(ACCOUNT_TYPE_LABELS[publicProfile.accountType])}</Text>
+              </View>
+            )}
             {!!seller.bio && <Text style={styles.bio}>{seller.bio}</Text>}
 
             <View style={styles.statsRow}>
@@ -268,25 +273,7 @@ export default function SellerProfileScreen() {
                   )}
                 </Svg>
               </Pressable>
-              {sellerListings[0] && (
-                <Pressable
-                  style={styles.chatIconBtn}
-                  onPress={async () => {
-                    if (!user) return;
-                    const isRealSeller = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seller.id);
-                    if (!isRealSeller) {
-                      Alert.alert(t("هذا حساب تجريبي"), t("لا يمكن بدء محادثة مع هذا الحساب."));
-                      return;
-                    }
-                    const chatId = await openOrCreateChat(user.id, seller.id, sellerListings[0].id);
-                    router.push(`/chat/${chatId}`);
-                  }}
-                >
-                  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#22A652" strokeWidth={2}>
-                    <Path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-                  </Svg>
-                </Pressable>
-              )}
+              {/* ↔ زر الشات اتلغى من صفحة المعلن: المحادثة بخصوص أى إعلان بقت من التعليقات والردود على الريل. */}
             </View>
 
             {liveFeatureEnabled && !!publicLives?.length && (
@@ -393,6 +380,8 @@ function createStyles(themeColors: ThemeColors) {
     profileBlock: { alignItems: "center", paddingHorizontal: 20, paddingBottom: 16 },
     avatar: { width: 76, height: 76, borderRadius: 38, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center", marginBottom: 10, overflow: "hidden" },
     avatarImg: { width: "100%", height: "100%" },
+    accountTypeChip: { alignSelf: "center", backgroundColor: themeColors.isDark ? "rgba(34,166,82,0.18)" : "#ecfdf5", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4, marginTop: 6 },
+    accountTypeText: { color: "#22A652", fontSize: 11.5, fontWeight: "900" },
     avatarText: { color: "white", fontWeight: "900", fontSize: 28 },
     name: { fontSize: 16, fontWeight: "900", color: themeColors.text },
     bio: { fontSize: 12.5, color: themeColors.textSubtle, marginTop: 4, textAlign: "center" },
@@ -410,7 +399,6 @@ function createStyles(themeColors: ThemeColors) {
       alignItems: "center", justifyContent: "center", backgroundColor: themeColors.card,
     },
     bellBtnActive: { borderColor: "#22A652", backgroundColor: themeColors.isDark ? "rgba(34,166,82,0.18)" : "#ecfdf5" },
-    chatIconBtn: { width: 44, height: 44, borderRadius: 999, borderWidth: 1.5, borderColor: "#22A652", alignItems: "center", justifyContent: "center" },
     sectionTitle: { alignSelf: "flex-start", fontSize: 13, fontWeight: "900", color: themeColors.text, marginTop: 22, marginBottom: 4 },
     liveCard: { width: 100 },
     liveCardMedia: { width: 100, height: 130, borderRadius: 12, backgroundColor: "#111827", alignItems: "center", justifyContent: "center" },

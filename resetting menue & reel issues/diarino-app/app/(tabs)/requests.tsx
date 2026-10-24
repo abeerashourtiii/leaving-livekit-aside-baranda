@@ -1,4 +1,6 @@
+import { useOffersTopBar } from "../../lib/hooks/useOffersTopBar";
 import { memo, useCallback, useMemo, useState } from "react";
+import { openNotificationItem } from "../../lib/notificationNavigation";
 import { router } from "expo-router";
 import { View, Text, Pressable, FlatList, StyleSheet, Alert, ActivityIndicator } from "react-native";
 import Svg, { Path } from "react-native-svg";
@@ -10,8 +12,9 @@ import { MakeOfferModal } from "../../components/requests/MakeOfferModal";
 import { NotificationsDropdown } from "../../components/notifications/NotificationsDropdown";
 import { useNotifications } from "../../lib/hooks/useNotifications";
 import { useFavorites } from "../../lib/hooks/useFavorites";
-import { usePaginatedRequests, useIncrementRequestOffers, RequestPageFilters } from "../../lib/hooks/useRequests";
-import { openOrCreateRequestChat, useSendMessage } from "../../lib/hooks/useChatsDB";
+import { usePaginatedRequests, RequestPageFilters } from "../../lib/hooks/useRequests";
+import { useSubmitRequestOffer, offerErrorCode } from "../../lib/hooks/usePropertyOffers";
+import { showToast } from "../../components/shared/Toast";
 import { useChatOnRequestsMap } from "../../lib/hooks/useContentSettings";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useLanguage } from "../../lib/hooks/useLanguage";
@@ -91,8 +94,7 @@ export default function RequestsScreen() {
   const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } = usePaginatedRequests(pageFilters);
   const filtered = useMemo(() => data?.pages.flat() ?? [], [data]);
 
-  const incrementOffers = useIncrementRequestOffers();
-  const sendMessage = useSendMessage();
+  const submitRequestOffer = useSubmitRequestOffer();
   const { favoriteRequests, toggleFavoriteRequest } = useFavorites();
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [offerRequest, setOfferRequest] = useState<PropertyRequest | null>(null);
@@ -103,6 +105,8 @@ export default function RequestsScreen() {
 
   const [notifMenuVisible, setNotifMenuVisible] = useState(false);
   const notifications = useNotifications();
+  // ↔ أيقونة «العروض» جنب جرس الإشعارات + نقطتها الحمراء (منفصلة عن الجرس).
+  const offersBar = useOffersTopBar();
   const { t } = useLanguage();
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
@@ -127,7 +131,8 @@ export default function RequestsScreen() {
     [favoriteRequests, chatOnRequestsMap, handleToggleFavoriteRequest, handleReportRequest, handleMakeOffer]
   );
 
-  // ↔ submitOffer()
+  // ↔ submitOffer(): العرض على الطلب بقى بيتسجّل على الخادم (request_offers) وبيفتح المحادثة ويبعت الرسالة الأولى —
+  //   فيظهر فى صفحة «العروض» (عروض الطلبات) ولدى الأدمن. الواتساب/السعر/الرسالة بيتحققوا على الخادم كمان.
   async function submitOffer(message: string, price: string, whatsapp: string) {
     if (!offerRequest || !user) return;
     const r = offerRequest;
@@ -138,20 +143,23 @@ export default function RequestsScreen() {
       return;
     }
 
-    try {
-      incrementOffers.mutate(r.id);
-      const chatId = await openOrCreateRequestChat(user.id, r.requesterId, r.id);
-      const fullMsg = message + (price ? `\nالسعر: ${fmtPrice(Number(price))} ج.م` : "");
-      await sendMessage.mutateAsync({
-        chatId, senderId: user.id,
-        text: `بخصوص طلبك (${r.type} - ${r.location}):\n${fullMsg}`,
-        whatsapp,
-      });
-      setOfferRequest(null);
-      router.push(`/chat/${chatId}`);
-    } catch {
-      Alert.alert(t("تعذر إرسال العرض"), t("حاول مرة أخرى."));
-    }
+    const num = price ? Number(price) : null;
+    submitRequestOffer.mutate(
+      { targetId: r.id, price: num && Number.isFinite(num) && num > 0 ? num : null, message, whatsapp },
+      {
+        onSuccess: ({ chatId }) => {
+          setOfferRequest(null);
+          showToast(t("تم إرسال عرضك لصاحب الطلب"));
+          if (chatId) router.push(`/chat/${chatId}`);
+        },
+        onError: (err) => {
+          const code = offerErrorCode(err);
+          if (code === "rate_limited") Alert.alert(t("قدّمت عروضًا كثيرة، انتظر قليلًا ثم حاول مرة أخرى"));
+          else if (code === "own_request") Alert.alert(t("لا يمكنك تقديم عرض على طلبك الخاص"));
+          else Alert.alert(t("تعذر إرسال العرض"), t("حاول مرة أخرى."));
+        },
+      }
+    );
   }
 
   return (
@@ -160,6 +168,8 @@ export default function RequestsScreen() {
         title="الطلبات"
         notifBadgeCount={notifications.totalUnread}
         onOpenNotifications={() => setNotifMenuVisible(true)}
+        onOpenOffers={offersBar.onOpenOffers}
+        offersBadge={offersBar.offersBadge}
       />
 
       <View style={styles.filterBar}>
@@ -227,23 +237,15 @@ export default function RequestsScreen() {
       <NotificationsDropdown
         visible={notifMenuVisible}
         onClose={() => setNotifMenuVisible(false)}
-        activeCat={notifications.activeCat}
-        onSwitchCat={notifications.setActiveCat}
         filter={notifications.filter}
         onSetFilter={notifications.setFilter}
-        badges={notifications.badges}
         items={notifications.visibleItems}
         onMarkAllRead={notifications.markAllRead}
         onItemPress={(index) => {
           const item = notifications.visibleItems[index];
           notifications.markItemRead(notifications.activeCat, index);
           setNotifMenuVisible(false);
-          if (!item?.action) return;
-          const a = item.action;
-          if (a.type === "seller") router.push(`/seller/${a.id}`);
-          else if (a.type === "property") router.push(`/property/${a.id}`);
-          else if (a.type === "reel") router.push(`/property/${a.propertyId}`);
-          else if (a.type === "chat") router.push(`/chat/${a.id}`);
+          openNotificationItem(item);
         }}
       />
     </View>

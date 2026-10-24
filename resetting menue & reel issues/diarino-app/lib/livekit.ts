@@ -49,14 +49,20 @@ export async function createLiveRoom(roomName: string, title: string): Promise<v
   if (userError || !userData.user) throw new Error("Not signed in");
 
   // تعديل جوهري: تغيير القيمة من "pending" إلى "none" لتفادي خرق قيد التحقق (Check Constraint) في Supabase
-  const { error } = await supabase.from("lives").insert({
+  const base = {
     room_name: roomName,
     host_id: userData.user.id,
     title,
     status: "live",
     recording_status: "none",
-  });
-  
+  };
+  // ↔ إقرار الحقوق قبل البث (lives.rights_declared_at — 20261015000000). لو الـ migration لسه ما اتطبقتش (العمود مش موجود)
+  // بنعيد المحاولة من غيره بدل ما نمنع البث.
+  let { error } = await supabase.from("lives").insert({ ...base, rights_declared_at: new Date().toISOString() });
+  if (error && (error.code === "PGRST204" || error.code === "42703" || /rights_declared_at/i.test(error.message))) {
+    ({ error } = await supabase.from("lives").insert(base));
+  }
+
   if (error) {
     console.error("Error creating live room in Supabase:", error);
     throw error;

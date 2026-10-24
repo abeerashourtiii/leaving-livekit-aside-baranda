@@ -24,6 +24,9 @@ import { showToast } from "../components/shared/Toast";
 import { buildProfileLink, shareLink } from "../lib/shareLinks";
 import { PictureInPictureModal } from "../components/shared/PictureInPictureModal";
 import { useIsAdmin } from "../lib/hooks/useIsAdmin";
+import { useDeleteAccount, deleteAccountErrorCode } from "../lib/hooks/useAccountDeletion";
+import { useOffersUnreadCount } from "../lib/hooks/useOffersHub";
+import { ConfirmModal } from "../components/shared/ConfirmModal";
 
 // New dedicated settings screen — reached from the menu page's "الإعدادات"
 // card. Pulls together the app-level settings that used to live only in
@@ -56,9 +59,13 @@ export default function SettingsScreen() {
   const [complaintsVisible, setComplaintsVisible] = useState(false);
   const [pipModalVisible, setPipModalVisible] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  // ↔ حذف الحساب (خطوتين تأكيد): 0 = مقفول، 1 = الشرح، 2 = التأكيد النهائى.
+  const [deleteStep, setDeleteStep] = useState<0 | 1 | 2>(0);
+  const deleteAccount = useDeleteAccount();
   const logSupportContact = useLogSupportContact();
   const { user } = useCurrentUser();
   const { profile } = useProfile();
+  const { data: newOffers = 0 } = useOffersUnreadCount(user && !user.is_anonymous ? user.id : undefined);
   const { isAdmin, checking: checkingAdmin } = useIsAdmin();
   const isGuest = !!user?.is_anonymous;
 
@@ -128,6 +135,22 @@ export default function SettingsScreen() {
     void performLogout();
   }
 
+  function performDeleteAccount() {
+    setDeleteStep(0);
+    deleteAccount.mutate(undefined, {
+      onSuccess: () => {
+        showToast(t("تم حذف حسابك نهائيًا"));
+        router.replace("/");
+      },
+      onError: (err) => {
+        const code = deleteAccountErrorCode(err);
+        if (code === "has_open_fees") showToast(t("لا يمكن حذف الحساب لوجود رسوم مستحقة. سدّدها أو تواصل مع الدعم أولًا."));
+        else if (code === "super_admin_cannot_delete") showToast(t("لا يمكن حذف حساب المشرف الأعلى قبل نقل الصلاحية لمشرف آخر."));
+        else showToast(t("تعذر حذف الحساب، حاول مرة أخرى أو تواصل مع الدعم."));
+      },
+    });
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -166,6 +189,8 @@ export default function SettingsScreen() {
         <Section title={t("الحساب")} themeColors={themeColors}>
           <Row icon={<ShareIcon />} label={t("مشاركة البروفايل")} onPress={() => { void handleShareProfile(); }} />
           <Row icon={<BellIcon />} label={t("تنبيهاتي المحفوظة")} onPress={() => router.push("/saved-alerts")} />
+          {/* ↔ العروض المستلمة والمرسلة (تقديم عرض من تفاصيل العقار) — شارة بعدد العروض الجديدة. */}
+          {!isGuest && <Row icon={<OfferIcon />} label={t("العروض والمحادثات")} badge={newOffers > 0 ? String(newOffers) : undefined} onPress={() => router.push("/offers")} />}
           {!checkingAdmin && isAdmin && (
             <Row icon={<AdminIcon />} label={t("لوحة تحكم الأدمن")} onPress={() => router.push("/admin")} />
           )}
@@ -229,9 +254,37 @@ export default function SettingsScreen() {
             onPress={isGuest ? goToLogin : confirmLogout}
             disabled={loggingOut}
           />
+          {/* ↔ حذف الحساب (شرط App Store وGoogle Play): فى الإعدادات مباشرة وللمسجَّلين فقط. */}
+          {!isGuest && (
+            <Row
+              icon={<TrashIcon />}
+              label={t("حذف حسابي")}
+              danger
+              onPress={() => setDeleteStep(1)}
+              disabled={deleteAccount.isPending}
+            />
+          )}
         </Section>
       </ScrollView>
 
+      <ConfirmModal
+        visible={deleteStep === 1}
+        title={t("حذف الحساب")}
+        text={t("سيُحذف حسابك وكل بياناتك نهائيًا: ملفك الشخصي وإعلاناتك وتعليقاتك ومفضلتك ومحادثاتك وإشعاراتك، ولا يمكن التراجع. يُحتفظ فقط بسجلات الصفقات والرسوم اللازمة قانونيًا. إن كانت عليك رسوم مستحقة فلن يتم الحذف قبل سدادها.")}
+        confirmLabel={t("متابعة")}
+        danger
+        onConfirm={() => setDeleteStep(2)}
+        onCancel={() => setDeleteStep(0)}
+      />
+      <ConfirmModal
+        visible={deleteStep === 2}
+        title={t("تأكيد الحذف النهائي")}
+        text={t("هل أنت متأكد تمامًا من حذف حسابك؟ لا يمكن استعادته بعد الحذف.")}
+        confirmLabel={t("نعم، احذف حسابي")}
+        danger
+        onConfirm={performDeleteAccount}
+        onCancel={() => setDeleteStep(0)}
+      />
       <LanguageSelectorModal visible={languageModalVisible} onClose={() => setLanguageModalVisible(false)} />
       <ThemeSelectorModal visible={themeModalVisible} onClose={() => setThemeModalVisible(false)} />
       <ContentSettingsModal visible={contentSettingsVisible} onClose={() => setContentSettingsVisible(false)} />
@@ -288,6 +341,8 @@ function MailIcon() { return <Svg {...iconProps}><Path d="M21 15a2 2 0 01-2 2H7l
 function FlagIcon() { return <Svg {...iconProps}><Path d="M4 22V4" /><Path d="M4 4h13l-2 4 2 4H4" /></Svg>; }
 function BellIcon() { return <Svg {...iconProps}><Path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" /></Svg>; }
 function ShareIcon() { return <Svg {...iconProps}><Circle cx={18} cy={5} r={2.5} /><Circle cx={6} cy={12} r={2.5} /><Circle cx={18} cy={19} r={2.5} /><Path d="M8.3 10.7l7.4-4.4M8.3 13.3l7.4 4.4" /></Svg>; }
+function TrashIcon() { return <Svg {...iconProps} stroke="#991B1B"><Path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6" /></Svg>; }
+function OfferIcon() { return <Svg {...iconProps}><Path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8z" /><Path d="M7.5 7.5h.01" /></Svg>; }
 function LogoutIcon() { return <Svg {...iconProps} stroke="#991B1B"><Path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><Path d="M16 17l5-5-5-5M21 12H9" /></Svg>; }
 function ProfileIcon() { return <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#22A652" strokeWidth={2}><Circle cx={12} cy={8} r={4} /><Path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></Svg>; }
 function PipIcon() { return <Svg {...iconProps}><Rect x={3} y={3} width={18} height={14} rx={2} /><Rect x={12} y={11} width={7} height={5} rx={1} /></Svg>; }

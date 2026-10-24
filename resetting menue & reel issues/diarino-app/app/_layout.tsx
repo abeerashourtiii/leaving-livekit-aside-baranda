@@ -14,12 +14,13 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "../lib/queryClient";
 import { completeOAuthCallback, consumeIntentionalSignOut } from "../lib/hooks/useAuth";
 import * as Linking from "expo-linking";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import { getAuthSnapshot, subscribeAuthState } from "../lib/hooks/useCurrentUser";
 import { applyPersistedRTLAtStartup } from "../lib/hooks/useLanguage";
 import { usePushNotifications } from "../lib/hooks/usePushNotifications";
 import { ErrorBoundary } from "../components/shared/ErrorBoundary";
 import { ToastHost } from "../components/shared/Toast";
+import { GuestLoginPromptHost } from "../components/shared/GuestLoginPrompt";
 import { LaunchVideoSplash } from "../components/launch/LaunchVideoSplash";
 import { showToast } from "../components/shared/Toast";
 import { router } from "expo-router";
@@ -73,7 +74,13 @@ export default function RootLayout() {
         lastUserIdRef.current = null;
         queryClient.clear();
         showToast("انتهت الجلسة، سجّل دخولك مجدداً");
-        router.replace("/");
+        // ↔ إصلاح «شاشة بيضاء عند فتح التطبيق»: لو الحدث ده حصل أثناء الإقلاع قبل جاهزية الـ navigator، router.replace كان بيرمى
+        // استثناء جوه مستمع الحالة (غير ممسوك) فيوقع التطبيق/يسيبه فاضى. دلوقتي ممسوك مع إعادة محاولة بعد لحظة.
+        try {
+          router.replace("/");
+        } catch {
+          setTimeout(() => { try { router.replace("/"); } catch { /* الشاشة الرئيسية بتتفتح لوحدها بدون جلسة */ } }, 500);
+        }
         return;
       }
       if (lastUserIdRef.current === undefined) {
@@ -89,10 +96,39 @@ export default function RootLayout() {
     });
   }, []);
 
+  // ↔ إصلاح «شاشة بيضاء عند الفتح»: `if (!isReady) return null` كانت بتفضل لحد ما applyPersistedRTLAtStartup() تخلص — ولو علقت (التخزين
+  // أو Updates.reloadAsync) التطبيق يفضل فاضى للأبد. مؤقّت أمان 4 ثوانٍ يفتح التطبيق فى كل الأحوال.
   useEffect(() => {
-    applyPersistedRTLAtStartup().finally(() => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
       setIsReady(true);
+    };
+    const safety = setTimeout(finish, 4000);
+    applyPersistedRTLAtStartup()
+      .catch((err) => console.warn("applyPersistedRTLAtStartup failed:", err))
+      .finally(() => {
+        clearTimeout(safety);
+        finish();
+      });
+    return () => clearTimeout(safety);
+  }, []);
+
+  // ↔ رجوع التطبيق من الخلفية بعد أكتر من 30 ثانية: نعيد جلب البيانات النشطة (الجلسة اتجدّدت أو التوكن كان منتهى فى الخلفية)،
+  // فالشاشات ما تفضلش فاضية أو قديمة لحد ما المستخدم يقفل التطبيق ويفتحه.
+  useEffect(() => {
+    let backgroundedAt = 0;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background") {
+        backgroundedAt = Date.now();
+      } else if (state === "active" && backgroundedAt) {
+        const away = Date.now() - backgroundedAt;
+        backgroundedAt = 0;
+        if (away > 30_000) void queryClient.invalidateQueries();
+      }
     });
+    return () => sub.remove();
   }, []);
 
   const onLayoutRootView = useCallback(async () => {
@@ -135,7 +171,20 @@ export default function RootLayout() {
               <Stack.Screen name="publish" options={{ presentation: "modal" }} />
               <Stack.Screen name="coming-soon" options={{ presentation: "modal" }} />
               <Stack.Screen name="settings" options={{ presentation: "modal" }} />
-              <Stack.Screen name="edit-profile" options={{ presentation: "modal" }} />
+              {/* ↔ فاتورة رسوم الخدمة (InstaPay) — app/invoice.tsx */}
+              <Stack.Screen name="invoice" options={{ presentation: "modal" }} />
+              {/* ↔ فاتورة الترويج المدفوع (افتتاحي / مميز) — app/promotion-invoice.tsx */}
+              <Stack.Screen name="promotion-invoice" options={{ presentation: "modal" }} />
+              {/* ↔ حجز المساحة الإعلانية (بانر القائمة/البحث) — app/ad-space.tsx */}
+              <Stack.Screen name="ad-space" options={{ presentation: "modal" }} />
+              {/* ↔ وضع الإكمال الإجبارى (?onboarding=1): بدون سحب لإغلاق الشاشة على آيفون. */}
+              <Stack.Screen
+                name="edit-profile"
+                options={({ route }) => ({
+                  presentation: "modal",
+                  gestureEnabled: (route.params as { onboarding?: string } | undefined)?.onboarding !== "1",
+                })}
+              />
               <Stack.Screen name="auth-email" options={{ presentation: "modal" }} />
               <Stack.Screen name="admin" />
               <Stack.Screen
@@ -148,6 +197,7 @@ export default function RootLayout() {
                 PiP وقايمة خيارات الريل، اللي بيظهروا فى شاشات تانية غير
                 settings.tsx. */}
             <ToastHost />
+            <GuestLoginPromptHost />
           </QueryClientProvider>
         </SafeAreaProvider>
         {showLaunch && <LaunchVideoSplash onDone={() => setShowLaunch(false)} />}

@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Text, View, ActivityIndicator, Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
-import { completeOAuthCallback } from '../lib/hooks/useAuth';
+import { completeOAuthCallback, awaitPendingAuthCallback, consumeRecoveryPending } from '../lib/hooks/useAuth';
 import { getAuthSnapshot } from '../lib/hooks/useCurrentUser';
 import { showToast } from '../components/shared/Toast';
 import { useLanguage } from '../lib/hooks/useLanguage';
@@ -24,7 +24,8 @@ export default function AuthCallback() {
           const callbackResult = await completeOAuthCallback(callbackUrl);
           if (callbackResult.error) throw new Error(callbackResult.error);
           if (isMounted) {
-            router.replace('/(tabs)');
+            // ↔ رابط «نسيت كلمة المرور» → صفحة تعيين كلمة مرور جديدة.
+            router.replace(consumeRecoveryPending() ? '/reset-password' : '/(tabs)');
             return;
           }
         }
@@ -40,8 +41,10 @@ export default function AuthCallback() {
             if (callbackResult.error && !getAuthSnapshot().user) throw new Error(callbackResult.error);
           }
         }
+        // ↔ رابط وصل والتطبيق شغّال فى الخلفية بيتكمّل من app/_layout.tsx — نستناه قبل ما نقرر الوجهة.
+        if (Platform.OS !== 'web') await awaitPendingAuthCallback();
         if (getAuthSnapshot().user && isMounted) {
-          router.replace('/(tabs)');
+          router.replace(consumeRecoveryPending() ? '/reset-password' : '/(tabs)');
         } else if (isMounted) {
           router.replace('/');
         }

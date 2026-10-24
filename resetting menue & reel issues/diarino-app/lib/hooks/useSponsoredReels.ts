@@ -1,5 +1,7 @@
+import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../supabase";
+import { useProfile } from "./useProfile";
 
 export type SponsoredReel = {
   id: string;
@@ -13,25 +15,61 @@ export type SponsoredReel = {
   active: boolean;
   startDate: string;
   endDate: string | null;
+  createdAt: string;
 };
 
 type Row = {
   id: string; property_id: string; placement: "intro" | "in_feed"; reach_goal: number | null; current_reach: number;
   age_min: number | null; age_max: number | null; gender_target: "all" | "male" | "female";
-  active: boolean; start_date: string; end_date: string | null;
+  active: boolean; start_date: string; end_date: string | null; created_at?: string;
 };
 
 function rowToSponsored(r: Row): SponsoredReel {
   return {
     id: r.id, propertyId: r.property_id, placement: r.placement, reachGoal: r.reach_goal, currentReach: r.current_reach,
     ageMin: r.age_min, ageMax: r.age_max, genderTarget: r.gender_target, active: r.active,
-    startDate: r.start_date, endDate: r.end_date,
+    startDate: r.start_date, endDate: r.end_date, createdAt: r.created_at ?? r.start_date,
   };
 }
 
-// ↔ the reels feed's intro reel + periodic featured insertion.
+// ↔ العمر من تاريخ الميلاد المسجَّل فى الحساب (YYYY-MM-DD)؛ null لو غير معروف (ضيف أو ما كتبش تاريخ ميلاد).
+export function ageFromBirthDate(birth: string | null | undefined, now: Date = new Date()): number | null {
+  if (!birth) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(birth);
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  let age = now.getFullYear() - y;
+  if (now.getMonth() + 1 < mo || (now.getMonth() + 1 === mo && now.getDate() < d)) age -= 1;
+  return age >= 0 && age < 120 ? age : null;
+}
+
+// ↔ هل الإعلان الممول مناسب للمشاهد؟
+//  • لو بلغ هدف الوصول (reach_goal) يتوقف عن الظهور.
+//  • الاستهداف بالفئة العمرية بقى مُفعَّلًا فعليًا (تاريخ الميلاد بيتجمع فى الحساب): الإعلان المستهدف يظهر فقط لمن عمره داخل الفئة،
+//    ومن ليس لديه تاريخ ميلاد (ضيف) يشاهد الإعلانات غير المستهدفة (كل الأعمار) فقط.
+export function isSponsorEligible(s: SponsoredReel, viewerAge: number | null): boolean {
+  if (s.reachGoal != null && s.currentReach >= s.reachGoal) return false;
+  if (s.ageMin == null && s.ageMax == null) return true;
+  if (viewerAge == null) return false;
+  if (s.ageMin != null && viewerAge < s.ageMin) return false;
+  if (s.ageMax != null && viewerAge > s.ageMax) return false;
+  return true;
+}
+
+// ↔ the reels feed's intro reel + periodic featured insertion (+ كارت «مميز» فى صفحة البحث).
 export function useActiveSponsoredReels() {
+  const { profile } = useProfile();
+  const viewerAge = ageFromBirthDate(profile?.birthDate);
+  // الأحدث أولًا (وقت إنشاء الإعلان الممول = وقت تفعيل الترويج): لو فى أكتر من إعلان من نفس النوع يظهر الأحدث فى الأعلى.
+  const select = useCallback(
+    (rows: SponsoredReel[]) =>
+      rows
+        .filter((s) => isSponsorEligible(s, viewerAge))
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0)),
+    [viewerAge],
+  );
   return useQuery({
+    select,
     queryKey: ["sponsoredReels", "active"],
     queryFn: async (): Promise<SponsoredReel[]> => {
       const today = new Date().toISOString().slice(0, 10);

@@ -74,7 +74,7 @@ export function AdminSponsoredReels() {
               <TextInput style={[styles.input, { flex: 1 }]} placeholder="أكبر عمر" placeholderTextColor={themeColors.textSubtle} keyboardType="number-pad" value={ageMax} onChangeText={setAgeMax} />
             </View>
             <Text style={styles.disclaimer}>
-              ⚠️ استهداف العمر/النوع غير مُفعّل فعليًا — التطبيق لا يجمع بيانات عمر أو نوع للمستخدمين حاليًا، فهذا الحقل للتسجيل فقط.
+              ℹ️ استهداف العمر مُفعَّل: يظهر الإعلان لمن عمره داخل المدى (من تاريخ الميلاد المسجل فى حسابه)، ومن ليس لديه تاريخ ميلاد (ضيف) لا يرى إلا الإعلانات بلا استهداف عمرى. استهداف النوع (ذكور/إناث) غير مفعّل بعد. وبمجرد بلوغ هدف الوصول يتوقف الإعلان تلقائيًا. الإعلانات المدفوعة من المعلنين تُنشأ هنا تلقائيًا بعد تأكيدك للسداد فى «الصفقات والرسوم ← الترويج المدفوع».
             </Text>
 
             <View style={styles.placementRow}>

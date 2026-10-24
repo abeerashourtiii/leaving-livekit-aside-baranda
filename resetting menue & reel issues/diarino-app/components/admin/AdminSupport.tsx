@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
 import { useAdminDB, deleteReel, deleteLive, deleteRequest, resolveReport } from "../../lib/hooks/useAdminDB";
+import { supabase } from "../../lib/supabase";
 import { useAdminAdContacts, useDismissAdContact } from "../../lib/hooks/useAdContacts";
 import { useAdminSuggestions, useDismissSuggestion } from "../../lib/hooks/useReports";
 import { useAdminSupportContacts, useDismissSupportContact } from "../../lib/hooks/useSupportMessages";
@@ -49,7 +50,7 @@ export function AdminSupport() {
 // ---------------------------------------------------------------------
 // البلاغات — content reports (reel/property, live, request)
 // ---------------------------------------------------------------------
-const TARGET_LABEL: Record<string, string> = { property: "ريل / إعلان", live: "بث مباشر", request: "طلب" };
+const TARGET_LABEL: Record<string, string> = { property: "ريل / إعلان", live: "بث مباشر", request: "طلب", comment: "تعليق" };
 
 function ReportsTab() {
   const db = useAdminDB();
@@ -65,6 +66,8 @@ function ReportsTab() {
   async function removeContent(id: string, targetId: string, targetType: string) {
     if (targetType === "live") await deleteLive(targetId);
     else if (targetType === "request") await deleteRequest(targetId);
+    // ↔ تعليق/رد مُبلَّغ عنه (reel_comments، الحذف بصلاحية reels) — بيحذف معه ردوده.
+    else if (targetType === "comment") await supabase.from("reel_comments").delete().eq("id", targetId);
     else await deleteReel(targetId);
     resolveReport(id);
     showToast("🗑️ تم حذف المحتوى المُبلَّغ عنه");

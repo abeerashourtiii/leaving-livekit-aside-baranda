@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../supabase";
 import { useCurrentUser } from "./useCurrentUser";
 import { Database } from "../../src/types/supabase";
+import { AccountType, isAccountType } from "../accountTypes";
 
 // ↔ بند 4 — مصدر واحد لبيانات البروفايل (avatar_url/full_name/username/
 // first_name/last_name/birth_date/gender/nationality/residence/phone_*)
@@ -24,6 +25,16 @@ export type Profile = {
   phoneCountryCode: string | null;
   phoneCountryName: string | null;
   bio: string | null;
+  // ↔ نوع الحساب (فرد/مطور/بروكر) — إجبارى بعد تسجيل الدخول بجوجل. null = لسه ما اتحددش.
+  accountType: AccountType | null;
+  // ↔ false لو عمود account_type لسه مش موجود فى قاعدة البيانات (migration 20261009000000 ما اتطبّقتش):
+  // بنقرأ البروفايل بدون العمود بدل ما كل شيء يفشل، وبوابة «نوع الحساب» ما بتشتغلش لحد ما يتطبّق.
+  accountTypeSupported: boolean;
+  // ↔ موافقة المستخدم على الشروط والسياسات (شروط الاستخدام + الخصوصية + البيع): وقت الموافقة وإصدار السياسات.
+  // null = لسه ما وافقش. policiesSupported=false لو أعمدتها لسه مش موجودة فى قاعدة البيانات (migration 20261010000000).
+  policiesAcceptedAt: string | null;
+  policiesVersion: string | null;
+  policiesSupported: boolean;
 };
 
 type ProfileRow = {
@@ -41,9 +52,12 @@ type ProfileRow = {
   phone_country_code: string | null;
   phone_country_name: string | null;
   bio: string | null;
+  account_type?: string | null;
+  policies_accepted_at?: string | null;
+  policies_version?: string | null;
 };
 
-function rowToProfile(r: ProfileRow): Profile {
+function rowToProfile(r: ProfileRow, accountTypeSupported = true, policiesSupported = true): Profile {
   return {
     id: r.id,
     fullName: r.full_name,
@@ -59,6 +73,11 @@ function rowToProfile(r: ProfileRow): Profile {
     phoneCountryCode: r.phone_country_code,
     phoneCountryName: r.phone_country_name,
     bio: r.bio,
+    accountType: isAccountType(r.account_type) ? r.account_type : null,
+    accountTypeSupported,
+    policiesAcceptedAt: r.policies_accepted_at ?? null,
+    policiesVersion: r.policies_version ?? null,
+    policiesSupported,
   };
 }
 
@@ -74,13 +93,19 @@ export function useProfile() {
     queryKey,
     queryFn: async (): Promise<Profile | null> => {
       if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from("profiles")
-        .select(SELECT_COLUMNS)
-        .eq("id", user.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data ? rowToProfile(data as unknown as ProfileRow) : null;
+      // ↔ نجرّب الأعمدة الأحدث الأول ونرجع للأقدم لو العمود لسه مش موجود (migrations مش متطبّقة بعد) بدل ما
+      // الأكاونت كله يفشل: [account_type + السياسات] ← [account_type] ← الأعمدة الأساسية.
+      const tiers = [`${SELECT_COLUMNS}, account_type, policies_accepted_at, policies_version`, `${SELECT_COLUMNS}, account_type`, SELECT_COLUMNS];
+      let tier = 0;
+      let res = await supabase.from("profiles").select(tiers[0]).eq("id", user.id).maybeSingle();
+      while (res.error && tier < tiers.length - 1) {
+        tier += 1;
+        res = (await supabase.from("profiles").select(tiers[tier]).eq("id", user.id).maybeSingle()) as typeof res;
+      }
+      const supported = tier <= 1;
+      const policiesSupported = tier === 0;
+      if (res.error) throw res.error;
+      return res.data ? rowToProfile(res.data as unknown as ProfileRow, supported, policiesSupported) : null;
     },
     enabled: !!user?.id,
     staleTime: 10_000,
@@ -91,6 +116,9 @@ export function useProfile() {
       fullName: string; username: string; firstName: string; lastName: string; avatarUrl: string;
       birthDate: string; gender: "male" | "female"; nationality: string; residence: string;
       phoneE164: string; phoneCountryCode: string; phoneCountryName: string; bio: string;
+      accountType: AccountType;
+      // ↔ الموافقة على السياسات: بنسجّل الوقت الحالى + إصدار السياسات.
+      policiesVersion: string;
     }>) => {
       if (!user?.id) throw new Error("لا يوجد مستخدم مسجّل دخول");
 
@@ -109,6 +137,9 @@ export function useProfile() {
         full_name?: string; username?: string; first_name?: string; last_name?: string; avatar_url?: string;
         birth_date?: string; gender?: string; nationality?: string; residence?: string;
         phone_e164?: string; phone_country_code?: string; phone_country_name?: string; bio?: string;
+        account_type?: string;
+        policies_accepted_at?: string;
+        policies_version?: string;
       } = {};
       if (patch.fullName !== undefined) row.full_name = patch.fullName;
       if (patch.username !== undefined) row.username = patch.username;
@@ -123,6 +154,11 @@ export function useProfile() {
       if (patch.phoneCountryCode !== undefined) row.phone_country_code = patch.phoneCountryCode;
       if (patch.phoneCountryName !== undefined) row.phone_country_name = patch.phoneCountryName;
       if (patch.bio !== undefined) row.bio = patch.bio;
+      if (patch.accountType !== undefined) row.account_type = patch.accountType;
+      if (patch.policiesVersion !== undefined) {
+        row.policies_accepted_at = new Date().toISOString();
+        row.policies_version = patch.policiesVersion;
+      }
 
       const { data, error } = await supabase
         .from("profiles")

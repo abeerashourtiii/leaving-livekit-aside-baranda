@@ -87,11 +87,13 @@ export const CRANE_CARD_ASPECT = 1070 / 935;
 export type MenuArtCard = {
   ar: ImageSourcePropType; en: ImageSourcePropType; bg: string; rim?: string; aspect?: number;
   sizes: string[]; labelAr: string; labelEn: string;
+  // ↔ علامة «!» + نافذة توضيح الخدمة (كارت «احمي استثمارك»). components/menu/ProtectInvestmentInfo.tsx
+  infoPopup?: "protect";
 };
 // ↔ كارت "وكيلك القانوني": الصورة (الميزان + "وكيلك القانوني" + "استشارات قانونية
 // عقارية متخصصة") هى الكارت كله بإطارها الذهبي، مقصوصة على حافة الإطار بالظبط،
 // والزوايا برّا القوس متملّية بلون الإطار. نسخة إنجليزية بنفس التصميم:
-// "Your Legal Agent" / "Specialized Real-Estate Legal Consultations".
+// "Protect Your Investment" / "Specialized Real-Estate Legal Consultations" (كان «وكيلك القانونى» / "Your Legal Agent").
 export const LEGAL_CARD_IMAGE: ImageSourcePropType = require("../assets/menu-icons/legal_card.png");
 export const LEGAL_CARD_IMAGE_EN: ImageSourcePropType = require("../assets/menu-icons/legal_card_en.png");
 export const LEGAL_CARD_ASPECT = 1848 / 684;
@@ -142,8 +144,9 @@ export const MENU_ART_CARDS: Record<string, MenuArtCard> = {
   scale: {
     ar: LEGAL_CARD_IMAGE, en: LEGAL_CARD_IMAGE_EN, bg: "#EDD5AC", aspect: LEGAL_CARD_ASPECT,
     sizes: ["half", "wide", "full"],
-    labelAr: "وكيلك القانوني — استشارات قانونية عقارية متخصصة",
-    labelEn: "Your Legal Agent — Specialized real-estate legal consultations",
+    infoPopup: "protect",
+    labelAr: "احمي استثمارك — استشارات قانونية عقارية متخصصة",
+    labelEn: "Protect Your Investment — Specialized real-estate legal consultations",
   },
   building: {
     ar: REPOO_CARD_IMAGE, en: REPOO_CARD_IMAGE_EN, bg: REPOO_CARD_BG, rim: REPOO_CARD_RIM,
@@ -167,6 +170,9 @@ export const MENU_ART_CARDS: Record<string, MenuArtCard> = {
 export const MENU_ART_BY_TITLE: Record<string, string> = {
   "repoo": "building",
   "ونش ونقل أثاث": "crane_truck",
+  // ↔ الاسم الجديد (احمي استثمارك) + الاسم القديم (لو الصف فى قاعدة البيانات لسه ما اتحدّثش) + كتابة الياء ألف مقصورة.
+  "احمي استثمارك": "scale",
+  "احمى استثمارك": "scale",
   "وكيلك القانوني": "scale",
   "ابحث عن عقار": "search_building",
   "اطلب عقارك": "chat",

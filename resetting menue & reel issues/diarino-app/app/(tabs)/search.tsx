@@ -1,4 +1,5 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { openNotificationItem } from "../../lib/notificationNavigation";
 import { router } from "expo-router";
 import { View, Text, TextInput, Pressable, FlatList, StyleSheet, ActivityIndicator } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -24,14 +25,14 @@ import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 import { LatLng, boundingBox, pointInPolygon } from "../../lib/geo";
 import { useActiveSponsoredReels } from "../../lib/hooks/useSponsoredReels";
+import { matchesLocationFilter, matchesSearchQuery } from "../../lib/sponsorMatch";
 import { usePropertiesByIds } from "../../lib/hooks/useProperties";
 import { useActiveAdBanners } from "../../lib/hooks/useAdBanners";
 import { AdBannerCarousel } from "../../components/menu/AdBannerCarousel";
 import { SponsoredAdReelModal } from "../../components/search/SponsoredAdReelModal";
-import { cldThumbnail } from "../../lib/cloudinary";
-import { Image } from "expo-image";
 import { padToEvenColumns } from "../../lib/gridPadding";
 import { AdGridCard } from "../../components/property/AdGridCard";
+import { setReelPlaylist } from "../../lib/reelPlaylist";
 
 type SearchResultCardProps = {
   item: Property;
@@ -39,16 +40,27 @@ type SearchResultCardProps = {
   isComparing: boolean;
   onOpenDetails: (propertyId: string) => void;
   onToggleCompare: (propertyId: string) => void;
+  // ↔ إعلان «مميز» مدفوع: بنفس حجم باقى الكروت مع شارة «ممول»، والضغط عليه يفتح نافذة الإعلان الممول (وتسجيل الوصول).
+  sponsoredReelId?: string;
+  onOpenSponsored?: (propertyId: string, reelId: string) => void;
 };
 
-const SearchResultCard = memo(function SearchResultCard({ item, index, isComparing, onOpenDetails, onToggleCompare }: SearchResultCardProps) {
+const SearchResultCard = memo(function SearchResultCard({ item, index, isComparing, onOpenDetails, onToggleCompare, sponsoredReelId, onOpenSponsored }: SearchResultCardProps) {
+  const { t } = useLanguage();
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
   return (
     <AdGridCard
       item={item}
       index={index}
-      onPress={() => onOpenDetails(item.id)}
+      onPress={() => (sponsoredReelId && onOpenSponsored ? onOpenSponsored(item.id, sponsoredReelId) : onOpenDetails(item.id))}
+      bottomStart={
+        sponsoredReelId ? (
+          <View style={styles.sponsoredPill}>
+            <Text style={styles.sponsoredPillText}>{t("ممول")}</Text>
+          </View>
+        ) : undefined
+      }
       topStart={
         <Pressable
           style={[styles.compareBadge, isComparing && styles.compareBadgeActive]}
@@ -99,13 +111,6 @@ export default function SearchScreen() {
     [sponsoredReels]
   );
   const { data: sponsorProperties } = usePropertiesByIds(sponsorPropertyIds);
-  const featuredSponsor = useMemo(() => {
-    const reel = sponsoredReels?.[0];
-    if (!reel) return null;
-    const property = sponsorProperties?.find((p) => p.id === reel.propertyId);
-    if (!property) return null;
-    return { reelId: reel.id, property };
-  }, [sponsoredReels, sponsorProperties]);
   const [openSponsoredAd, setOpenSponsoredAd] = useState<{ reelId: string; property: Property } | null>(null);
 
   const debouncedQuery = useDebouncedValue(query, 400);
@@ -181,7 +186,17 @@ export default function SearchScreen() {
     (filters.priceMin > 0 || Number.isFinite(filters.priceMax) ? 1 : 0) +
     (filters.areaMin > 0 || Number.isFinite(filters.areaMax) ? 1 : 0);
 
-  const handleOpenDetails = useCallback((propertyId: string) => router.push(`/property/${propertyId}/reel`), []);
+  // ↔ تصفّح ريل بريل بين نتائج البحث (زى صفحة المعلن وإعلاناتي): النتائج الحالية بتتحط فى reelPlaylist
+  // وشاشة الريل بتفتح بـ ?list=search فتعرض نفس النتائج بسحب رأسى. النتائج بتتحدّث لحظيًا (صفحات أكتر).
+  const loadMoreResults = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  useEffect(() => {
+    setReelPlaylist("search", { items: results, hasMore: !!hasNextPage, loadMore: hasNextPage ? loadMoreResults : null });
+  }, [results, hasNextPage, loadMoreResults]);
+  const handleOpenDetails = useCallback((propertyId: string) => {
+    router.push(`/property/${propertyId}/reel?list=search`);
+  }, []);
   const handleToggleCompare = useCallback(
     (propertyId: string) => {
       const result = compareSelection.toggle(propertyId);
@@ -189,8 +204,35 @@ export default function SearchScreen() {
     },
     [compareSelection, t]
   );
+  // ↔ الإعلانات «المميزة» المدفوعة تظهر كأول كروت فى شبكة النتائج وبنفس حجم باقى الكروت (مش بعرض الصفحة)، الأحدث فى الأعلى.
+  //   تتفلتر بالمحافظة/المنطقة (ونص البحث): لو عقار الإعلان المميز خارج محافظة/منطقة البحث لا يظهر. ولا تظهر مع البحث بالخريطة/الموقع.
+  const featuredEntries = useMemo(() => {
+    if (appliedPolygon || geoPoint) return [] as { reelId: string; property: Property }[];
+    const byId = new Map((sponsorProperties ?? []).map((p) => [p.id, p]));
+    const seen = new Set<string>();
+    const out: { reelId: string; property: Property }[] = [];
+    for (const s of sponsoredReels ?? []) { // مرتبة من الأحدث
+      if (s.placement !== "in_feed" || seen.has(s.propertyId)) continue;
+      const p = byId.get(s.propertyId);
+      if (!p || p.closedType) continue;
+      if (!matchesLocationFilter(p, filters.provinces, filters.regions)) continue;
+      if (!matchesSearchQuery(p, debouncedQuery)) continue;
+      seen.add(p.id);
+      out.push({ reelId: s.id, property: p });
+    }
+    return out;
+  }, [sponsoredReels, sponsorProperties, filters.provinces, filters.regions, debouncedQuery, appliedPolygon, geoPoint]);
+  const featuredReelByProperty = useMemo(() => new Map(featuredEntries.map((e) => [e.property.id, e.reelId])), [featuredEntries]);
+  const gridResults = useMemo(
+    () => (featuredEntries.length ? [...featuredEntries.map((e) => e.property), ...results.filter((p) => !featuredReelByProperty.has(p.id))] : results),
+    [featuredEntries, featuredReelByProperty, results]
+  );
   // ↔ الكارت الأخير المنفرد فى الصف بقى بنص الصف بدل الصف كله (lib/gridPadding.ts).
-  const paddedResults = useMemo(() => padToEvenColumns(results), [results]);
+  const paddedResults = useMemo(() => padToEvenColumns(gridResults), [gridResults]);
+  const handleOpenSponsored = useCallback((propertyId: string, reelId: string) => {
+    const property = featuredEntries.find((e) => e.property.id === propertyId)?.property;
+    if (property) setOpenSponsoredAd({ reelId, property });
+  }, [featuredEntries]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: Property | null; index: number }) => item === null ? (
@@ -202,9 +244,11 @@ export default function SearchScreen() {
         isComparing={compareSelection.isSelected(item.id)}
         onOpenDetails={handleOpenDetails}
         onToggleCompare={handleToggleCompare}
+        sponsoredReelId={featuredReelByProperty.get(item.id)}
+        onOpenSponsored={handleOpenSponsored}
       />
     ),
-    [compareSelection, handleOpenDetails, handleToggleCompare]
+    [compareSelection, handleOpenDetails, handleToggleCompare, featuredReelByProperty, handleOpenSponsored]
   );
 
   return (
@@ -337,26 +381,10 @@ export default function SearchScreen() {
           onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
           onEndReachedThreshold={0.5}
           ListHeaderComponent={
-            (adBanners && adBanners.length > 0) || featuredSponsor ? (
-              <View style={{ gap: 10, paddingHorizontal: 14, marginBottom: 4 }}>
-                {adBanners && adBanners.length > 0 && <AdBannerCarousel banners={adBanners} />}
-                {featuredSponsor && (
-                  <Pressable
-                    style={styles.sponsoredCard}
-                    onPress={() => setOpenSponsoredAd(featuredSponsor)}
-                  >
-                    <Image
-                      source={{ uri: cldThumbnail(featuredSponsor.property.coverImage ?? "") }}
-                      style={styles.sponsoredCardImg}
-                      contentFit="cover"
-                      transition={150}
-                    />
-                    <View style={styles.sponsoredCardOverlay}>
-                      <Text style={styles.sponsoredBadge}>{t("إعلان ممول")}</Text>
-                      <Text style={styles.sponsoredCardTitle} numberOfLines={1}>{featuredSponsor.property.title}</Text>
-                    </View>
-                  </Pressable>
-                )}
+            // ↔ إعلانات «المساحة الإعلانية» (من صفحة القائمة) بعرض الصفحة وبنفس مقاسها، وتظهر مع كل الفلاتر.
+            adBanners && adBanners.length > 0 ? (
+              <View style={{ paddingHorizontal: 14, marginBottom: 4 }}>
+                <AdBannerCarousel banners={adBanners} />
               </View>
             ) : null
           }
@@ -406,23 +434,15 @@ export default function SearchScreen() {
       <NotificationsDropdown
         visible={notifMenuVisible}
         onClose={() => setNotifMenuVisible(false)}
-        activeCat={notifications.activeCat}
-        onSwitchCat={notifications.setActiveCat}
         filter={notifications.filter}
         onSetFilter={notifications.setFilter}
-        badges={notifications.badges}
         items={notifications.visibleItems}
         onMarkAllRead={notifications.markAllRead}
         onItemPress={(index) => {
           const item = notifications.visibleItems[index];
           notifications.markItemRead(notifications.activeCat, index);
           setNotifMenuVisible(false);
-          if (!item?.action) return;
-          const a = item.action;
-          if (a.type === "seller") router.push(`/seller/${a.id}`);
-          else if (a.type === "property") router.push(`/property/${a.id}`);
-          else if (a.type === "reel") router.push(`/property/${a.propertyId}`);
-          else if (a.type === "chat") router.push(`/chat/${a.id}`);
+          openNotificationItem(item);
         }}
       />
 
@@ -438,6 +458,8 @@ export default function SearchScreen() {
 function createStyles(themeColors: ThemeColors) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: themeColors.background },
+    sponsoredPill: { backgroundColor: "rgba(217,119,6,0.95)", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+    sponsoredPillText: { color: "white", fontSize: 10.5, fontWeight: "900" },
     sponsoredCard: { height: 90, borderRadius: 14, overflow: "hidden", backgroundColor: themeColors.surface },
     sponsoredCardImg: { ...StyleSheet.absoluteFillObject },
     sponsoredCardOverlay: {

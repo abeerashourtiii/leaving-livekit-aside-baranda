@@ -1,4 +1,7 @@
+import { adWindow, requestWindow, formatRemaining } from "../../lib/adWindow";
+import { useOffersTopBar } from "../../lib/hooks/useOffersTopBar";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { openNotificationItem } from "../../lib/notificationNavigation";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import {
   View, Text, Pressable, ScrollView, StyleSheet, TextInput, Modal, Alert, ActivityIndicator,
@@ -31,6 +34,8 @@ import { uploadToCloudinary, cldOptimized } from "../../lib/cloudinary";
 import { useLogMedia } from "../../lib/hooks/useMedia";
 import { useDrafts, useDraftMutations } from "../../lib/hooks/useDrafts";
 import { useFeatureFlag } from "../../lib/hooks/useFeatureFlags";
+import { useMyDeals } from "../../lib/hooks/useDeals";
+import { useMyPromotions, livePromotionsFor } from "../../lib/hooks/usePromotions";
 
 type AccountTab = "ads" | "requests" | "lives" | "favorites" | "drafts";
 
@@ -74,6 +79,8 @@ export default function AccountScreen() {
 
   const [notifMenuVisible, setNotifMenuVisible] = useState(false);
   const notifications = useNotifications();
+  // ↔ أيقونة «العروض» جنب جرس الإشعارات + نقطتها الحمراء (منفصلة عن الجرس).
+  const offersBar = useOffersTopBar();
 
   const { favoriteProperties, favoriteRequests, totalCount, toggleFavoriteProperty, toggleFavoriteRequest } = useFavorites();
   const { savedLives } = useMyContent();
@@ -82,6 +89,10 @@ export default function AccountScreen() {
   const { data: allProperties = [] } = useProperties();
   const deleteRequest = useDeleteRequest();
   const { data: myAdsRaw = [], isLoading: adsLoading, isError: adsError, refetch: refetchAds } = useMyProperties(user?.id);
+  // ↔ صفقات المعلن (رسوم الخدمة): تُستخدم لملاحظة حالة الفاتورة على كارت الإعلان المُغلق (تم البيع / تم الإيجار).
+  const { data: myDeals } = useMyDeals(user?.id);
+  // ↔ طلبات الترويج (افتتاحي / مميز): ملاحظة حالتها على كارت الإعلان.
+  const { data: myPromos } = useMyPromotions(user?.id);
   // ↔ المثبّتة فى الأول (الأحدث تثبيتًا أولًا) وبعدها الأحدث نشرًا — نفس ترتيب صفحة المعلن.
   const myAds = useMemo(
     () => [...myAdsRaw].sort((a, b) => {
@@ -208,6 +219,8 @@ export default function AccountScreen() {
         title="حسابي"
         notifBadgeCount={notifications.totalUnread}
         onOpenNotifications={() => setNotifMenuVisible(true)}
+        onOpenOffers={offersBar.onOpenOffers}
+        offersBadge={offersBar.offersBadge}
       />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
@@ -276,6 +289,41 @@ export default function AccountScreen() {
                         key={ad.id}
                         item={ad}
                         index={rowIndex * 2 + colIndex}
+                        // ↔ رسالة المراجعة على الكارت: «قيد المراجعة» لحد موافقة الأدمن (وبعدها بتختفى هى والشارة)، أو سبب الرفض.
+                        note={
+                          ad.moderationStatus === "pending"
+                            ? { tone: "pending", text: t("قيد المراجعة: سيظهر إعلانك للجميع بعد موافقة الإدارة.") }
+                            : ad.moderationStatus === "rejected"
+                            ? { tone: "rejected", text: `${t("تم رفض الإعلان")}${ad.moderationReason ? ` — ${t("السبب")}: ${ad.moderationReason}` : ""}. ${t("عدّل الإعلان لإعادة إرساله للمراجعة.")}` }
+                            : ad.closedType
+                            ? (() => {
+                                // ↔ إعلان مُغلق بصفقة: نوضّح حالة فاتورة رسوم الخدمة (السداد يتم من ⋮ ← الفاتورة وتأكيد السداد).
+                                const st = myDeals?.get(ad.id)?.status;
+                                if (st === "paid") return { tone: "info" as const, text: t("تم سداد رسوم الخدمة. شكرًا لك.") };
+                                if (st === "submitted") return { tone: "info" as const, text: t("تم إرسال تأكيد السداد — بانتظار مراجعة التطبيق.") };
+                                if (st === "reported" || st === "invoiced" || st === "disputed") return { tone: "pending" as const, text: t("رسوم الخدمة مستحقة — اضغط ⋮ ثم «الفاتورة وتأكيد السداد».") };
+                                return undefined;
+                              })()
+                            : livePromotionsFor(myPromos, ad.id).length > 0
+                            ? (() => {
+                                // ↔ ترويج مدفوع قائم لهذا الإعلان: مفعّل (حتى تاريخ) / بانتظار مراجعة السداد / بانتظار السداد.
+                                const p = livePromotionsFor(myPromos, ad.id)[0];
+                                const kindLabel = p.kind === "intro" ? t("افتتاحي") : t("مميز");
+                                if (p.status === "active") {
+                                  const until = p.endsAt ? new Date(p.endsAt).toLocaleDateString(language === "ar" ? "ar-EG" : "en-US", { month: "long", day: "numeric" }) : "";
+                                  return { tone: "info" as const, text: `${t("ترويج")} ${kindLabel} ${t("مفعّل حتى")} ${until}` };
+                                }
+                                if (p.status === "submitted") return { tone: "info" as const, text: `${t("ترويج")} ${kindLabel}: ${t("تم إرسال تأكيد السداد — بانتظار مراجعة التطبيق.")}` };
+                                return { tone: "pending" as const, text: `${t("ترويج")} ${kindLabel}: ${t("بانتظار السداد — اضغط ⋮ ثم «اجعل الإعلان افتتاحي أو مميز».")}` };
+                              })()
+                            : (() => {
+                                // ↔ إعلان منشور داخل نافذة الـ 24 ساعة: نوضّح للمعلن الوقت المتبقى للتعديل والحذف.
+                                const w = adWindow(ad);
+                                return w.published && w.remainingMs != null && w.remainingMs > 0 && !ad.closedType
+                                  ? { tone: "info" as const, text: `${t("يمكنك تعديل إعلانك أو حذفه خلال")} ${formatRemaining(w.remainingMs, language)}` }
+                                  : undefined;
+                              })()
+                        }
                         onPress={() => router.push(`/property/${ad.id}/reel?sellerId=${ad.seller.id}`)}
                         onLongPress={() => setAdSheetTarget(ad)}
                         topStart={
@@ -329,9 +377,17 @@ export default function AccountScreen() {
                       <Text style={styles.favCardPrice}>{t("حتى")} {r.priceMax ? fmtPrice(r.priceMax) : "—"} {t("ج.م")}</Text>
                     </View>
                     <Text style={styles.favCardLoc}>📍 {r.province} · {r.location}</Text>
-                    <Pressable style={styles.removeBtn} onPress={() => setPendingRemoval({ kind: "request", id: r.id })}>
-                      <Text style={styles.removeBtnText}>🗑️ {t("حذف")}</Text>
-                    </Pressable>
+                    {/* ↔ الحذف متاح خلال 24 ساعة من عرض الطلب فقط؛ بعدها من حق المشرفين (migration 20261021000000). */}
+                    {requestWindow(r.createdAt).deletable ? (
+                      <>
+                        <Pressable style={styles.removeBtn} onPress={() => setPendingRemoval({ kind: "request", id: r.id })}>
+                          <Text style={styles.removeBtnText}>🗑️ {t("حذف")}</Text>
+                        </Pressable>
+                        <Text style={styles.requestWindowNote}>{`${t("يمكنك حذف الطلب خلال")} ${formatRemaining(requestWindow(r.createdAt).remainingMs, language)}`}</Text>
+                      </>
+                    ) : (
+                      <Text style={styles.requestWindowNote}>{t("انتهت مدة الحذف (24 ساعة من عرض الطلب). الحذف من حق المشرفين.")}</Text>
+                    )}
                   </View>
                 ))}
               </View>
@@ -518,23 +574,15 @@ export default function AccountScreen() {
       <NotificationsDropdown
         visible={notifMenuVisible}
         onClose={() => setNotifMenuVisible(false)}
-        activeCat={notifications.activeCat}
-        onSwitchCat={notifications.setActiveCat}
         filter={notifications.filter}
         onSetFilter={notifications.setFilter}
-        badges={notifications.badges}
         items={notifications.visibleItems}
         onMarkAllRead={notifications.markAllRead}
         onItemPress={(index) => {
           const item = notifications.visibleItems[index];
           notifications.markItemRead(notifications.activeCat, index);
           setNotifMenuVisible(false);
-          if (!item?.action) return;
-          const a = item.action;
-          if (a.type === "seller") router.push(`/seller/${a.id}`);
-          else if (a.type === "property") router.push(`/property/${a.id}`);
-          else if (a.type === "reel") router.push(`/property/${a.propertyId}`);
-          else if (a.type === "chat") router.push(`/chat/${a.id}`);
+          openNotificationItem(item);
         }}
       />
 
@@ -645,6 +693,7 @@ function createStyles(themeColors: ThemeColors) {
     pinHint: { fontSize: 11.5, color: themeColors.textSubtle, fontWeight: "700", marginBottom: 8, textAlign: "left" },
     adStatusBadge: { borderRadius: 999, paddingVertical: 3, paddingHorizontal: 7, backgroundColor: "#D97706" },
     adStatusBadgeRejected: { backgroundColor: "#B91C1C" },
+    adStatusBadgeClosed: { backgroundColor: "#15803D" },
     adStatusBadgeText: { color: "white", fontSize: 8.5, fontWeight: "900" },
     pinnedBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center" },
     publicBadge: { position: "absolute", top: 6, right: 6, backgroundColor: "#3b82f6", borderRadius: 999, paddingVertical: 2, paddingHorizontal: 6 },
@@ -659,6 +708,7 @@ function createStyles(themeColors: ThemeColors) {
     favCardPrice: { fontSize: 12.5, fontWeight: "900", color: "#22A652" },
     favCardLoc: { fontSize: 11.5, color: themeColors.textSubtle, marginBottom: 10 },
     removeBtn: { backgroundColor: themeColors.isDark ? "rgba(239,68,68,0.18)" : "#FEE2E2", borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },
+    requestWindowNote: { fontSize: 11, lineHeight: 17, color: themeColors.textSubtle, marginTop: 4 },
     removeBtnText: { color: themeColors.isDark ? "#FCA5A5" : "#991B1B", fontSize: 11.5, fontWeight: "900" },
     bioBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
     bioModal: { position: "absolute", left: 20, right: 20, top: "35%", backgroundColor: themeColors.card, borderRadius: 16, padding: 18 },

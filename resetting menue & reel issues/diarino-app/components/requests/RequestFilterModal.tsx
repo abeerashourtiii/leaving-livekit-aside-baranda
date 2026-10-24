@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { ChipLabel } from "../shared/ChipLabel";
 import {
   Modal, View, Text, TextInput, Pressable, ScrollView, StyleSheet, Animated, PanResponder,
   NativeSyntheticEvent, NativeScrollEvent,
@@ -106,7 +107,7 @@ export function RequestFilterModal({ visible, value, onApply, onClose }: Props) 
           <View style={styles.chipsRow}>
             {(["all", "sale", "rent"] as const).map((p) => (
               <Pressable key={p} style={draft.purpose === p ? styles.chipActive : styles.chip} onPress={() => setDraft((d) => ({ ...d, purpose: p }))}>
-                <Text style={draft.purpose === p ? styles.chipActiveText : styles.chipText}>{p === "all" ? t("الكل") : p === "sale" ? t("بيع") : t("إيجار")}</Text>
+                <ChipLabel text={p === "all" ? t("الكل") : p === "sale" ? t("بيع") : t("إيجار")} active={draft.purpose === p} textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
               </Pressable>
             ))}
           </View>
@@ -115,7 +116,7 @@ export function RequestFilterModal({ visible, value, onApply, onClose }: Props) 
           <View style={styles.chipsRow}>
             {TYPES.map((ty) => (
               <Pressable key={ty} style={draft.type === ty ? styles.chipActive : styles.chip} onPress={() => setDraft((d) => ({ ...d, type: ty }))}>
-                <Text style={draft.type === ty ? styles.chipActiveText : styles.chipText}>{ty === "all" ? t("الكل") : t(ty)}</Text>
+                <ChipLabel text={ty === "all" ? t("الكل") : t(ty)} active={draft.type === ty} textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
               </Pressable>
             ))}
           </View>
@@ -123,11 +124,11 @@ export function RequestFilterModal({ visible, value, onApply, onClose }: Props) 
           <Text style={styles.section}>{t("المحافظة")}</Text>
           <View style={styles.chipsRow}>
             <Pressable style={draft.province === "" ? styles.chipActive : styles.chip} onPress={clearProvince}>
-              <Text style={draft.province === "" ? styles.chipActiveText : styles.chipText}>{t("الكل")}</Text>
+              <ChipLabel text={t("الكل")} active={draft.province === ""} textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
             </Pressable>
             {draft.province !== "" && (
               <Pressable style={styles.chipActive} onPress={clearProvince}>
-                <Text style={styles.chipActiveText}>{t(draft.province)} ×</Text>
+                <ChipLabel text={`${t(draft.province)} ×`} active textStyle={styles.chipText} activeTextStyle={styles.chipActiveText} />
               </Pressable>
             )}
           </View>

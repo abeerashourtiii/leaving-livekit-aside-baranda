@@ -39,6 +39,558 @@ export type Database = {
   }
   public: {
     Tables: {
+      moderation_settings: {
+        Row: { id: boolean; require_reel_approval: boolean; updated_at: string; updated_by: string | null }
+        Insert: { id?: boolean; require_reel_approval?: boolean; updated_at?: string; updated_by?: string | null }
+        Update: { id?: boolean; require_reel_approval?: boolean; updated_at?: string; updated_by?: string | null }
+        Relationships: []
+      }
+      request_offers: {
+        Row: {
+          chat_id: string | null
+          created_at: string
+          id: string
+          message: string
+          offerer_id: string
+          price: number | null
+          request_id: string | null
+          request_title: string
+          requester_id: string
+          responded_at: string | null
+          status: string
+          updated_at: string
+          whatsapp: string | null
+        }
+        Insert: {
+          chat_id?: string | null
+          created_at?: string
+          id?: string
+          message: string
+          offerer_id: string
+          price?: number | null
+          request_id?: string | null
+          request_title?: string
+          requester_id: string
+          responded_at?: string | null
+          status?: string
+          updated_at?: string
+          whatsapp?: string | null
+        }
+        Update: {
+          chat_id?: string | null
+          created_at?: string
+          id?: string
+          message?: string
+          offerer_id?: string
+          price?: number | null
+          request_id?: string | null
+          request_title?: string
+          requester_id?: string
+          responded_at?: string | null
+          status?: string
+          updated_at?: string
+          whatsapp?: string | null
+        }
+        Relationships: []
+      }
+      property_offers: {
+        Row: {
+          chat_id: string | null
+          created_at: string
+          id: string
+          message: string
+          offerer_id: string
+          price: number | null
+          property_id: string
+          responded_at: string | null
+          seller_id: string
+          status: string
+          updated_at: string
+          whatsapp: string | null
+        }
+        Insert: {
+          chat_id?: string | null
+          created_at?: string
+          id?: string
+          message: string
+          offerer_id: string
+          price?: number | null
+          property_id: string
+          responded_at?: string | null
+          seller_id: string
+          status?: string
+          updated_at?: string
+          whatsapp?: string | null
+        }
+        Update: {
+          chat_id?: string | null
+          created_at?: string
+          id?: string
+          message?: string
+          offerer_id?: string
+          price?: number | null
+          property_id?: string
+          responded_at?: string | null
+          seller_id?: string
+          status?: string
+          updated_at?: string
+          whatsapp?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_offers_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reel_comments: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          like_count: number
+          owner_liked: boolean
+          parent_id: string | null
+          pinned_at: string | null
+          property_id: string
+          reply_count: number
+          reply_to_user_id: string | null
+          user_id: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          like_count?: number
+          owner_liked?: boolean
+          parent_id?: string | null
+          pinned_at?: string | null
+          property_id: string
+          reply_count?: number
+          reply_to_user_id?: string | null
+          user_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          like_count?: number
+          owner_liked?: boolean
+          parent_id?: string | null
+          pinned_at?: string | null
+          property_id?: string
+          reply_count?: number
+          reply_to_user_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reel_comments_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reel_comments_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "reel_comments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reel_comment_likes: {
+        Row: { comment_id: string; created_at: string; user_id: string }
+        Insert: { comment_id: string; created_at?: string; user_id: string }
+        Update: { comment_id?: string; created_at?: string; user_id?: string }
+        Relationships: [
+          {
+            foreignKeyName: "reel_comment_likes_comment_id_fkey"
+            columns: ["comment_id"]
+            isOneToOne: false
+            referencedRelation: "reel_comments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      property_deals: {
+        Row: {
+          admin_note: string | null
+          deal_type: string
+          due_at: string | null
+          fee_egp: number
+          handled_at: string | null
+          handled_by: string | null
+          id: string
+          note: string | null
+          paid_at: string | null
+          payer_account_type: string | null
+          payer_id: string | null
+          payer_name: string | null
+          payer_phone: string | null
+          payer_email: string | null
+          payment_method: string | null
+          payment_ref: string | null
+          payment_sender_name: string | null
+          payment_sender_email: string | null
+          payment_contact_phone: string | null
+          payment_submitted_at: string | null
+          property_id: string | null
+          property_province: string | null
+          property_title: string
+          reported_at: string
+          status: string
+        }
+        Insert: {
+          admin_note?: string | null
+          deal_type: string
+          due_at?: string | null
+          fee_egp: number
+          handled_at?: string | null
+          handled_by?: string | null
+          id?: string
+          note?: string | null
+          paid_at?: string | null
+          payer_account_type?: string | null
+          payer_id?: string | null
+          payer_name?: string | null
+          payer_phone?: string | null
+          payer_email?: string | null
+          payment_method?: string | null
+          payment_ref?: string | null
+          payment_sender_name?: string | null
+          payment_sender_email?: string | null
+          payment_contact_phone?: string | null
+          payment_submitted_at?: string | null
+          property_id?: string | null
+          property_province?: string | null
+          property_title?: string
+          reported_at?: string
+          status?: string
+        }
+        Update: {
+          admin_note?: string | null
+          deal_type?: string
+          due_at?: string | null
+          fee_egp?: number
+          handled_at?: string | null
+          handled_by?: string | null
+          id?: string
+          note?: string | null
+          paid_at?: string | null
+          payer_account_type?: string | null
+          payer_id?: string | null
+          payer_name?: string | null
+          payer_phone?: string | null
+          payer_email?: string | null
+          payment_method?: string | null
+          payment_ref?: string | null
+          payment_sender_name?: string | null
+          payment_sender_email?: string | null
+          payment_contact_phone?: string | null
+          payment_submitted_at?: string | null
+          property_id?: string | null
+          property_province?: string | null
+          property_title?: string
+          reported_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_deals_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deal_settings: {
+        Row: {
+          fee_egp: number
+          fee_rent_egp: number
+          id: boolean
+          notify_days: number
+          pay_days: number
+          payment_instructions: string | null
+          protection_days: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          fee_egp?: number
+          fee_rent_egp?: number
+          id?: boolean
+          notify_days?: number
+          pay_days?: number
+          payment_instructions?: string | null
+          protection_days?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          fee_egp?: number
+          fee_rent_egp?: number
+          id?: boolean
+          notify_days?: number
+          pay_days?: number
+          payment_instructions?: string | null
+          protection_days?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      ad_promotions: {
+        Row: {
+          admin_note: string | null
+          age_max: number | null
+          age_min: number | null
+          created_at: string
+          duration_days: number
+          ends_at: string | null
+          handled_at: string | null
+          handled_by: string | null
+          id: string
+          kind: string
+          paid_at: string | null
+          payer_email: string | null
+          payer_id: string | null
+          payer_name: string | null
+          payer_phone: string | null
+          payment_contact_phone: string | null
+          payment_method: string | null
+          payment_ref: string | null
+          payment_sender_name: string | null
+          payment_submitted_at: string | null
+          price_egp: number
+          property_id: string | null
+          property_title: string
+          reach_goal: number | null
+          sponsored_reel_id: string | null
+          starts_at: string | null
+          status: string
+        }
+        Insert: {
+          admin_note?: string | null
+          age_max?: number | null
+          age_min?: number | null
+          created_at?: string
+          duration_days?: number
+          ends_at?: string | null
+          handled_at?: string | null
+          handled_by?: string | null
+          id?: string
+          kind?: string
+          paid_at?: string | null
+          payer_email?: string | null
+          payer_id?: string | null
+          payer_name?: string | null
+          payer_phone?: string | null
+          payment_contact_phone?: string | null
+          payment_method?: string | null
+          payment_ref?: string | null
+          payment_sender_name?: string | null
+          payment_submitted_at?: string | null
+          price_egp?: number
+          property_id?: string | null
+          property_title?: string
+          reach_goal?: number | null
+          sponsored_reel_id?: string | null
+          starts_at?: string | null
+          status?: string
+        }
+        Update: {
+          admin_note?: string | null
+          age_max?: number | null
+          age_min?: number | null
+          created_at?: string
+          duration_days?: number
+          ends_at?: string | null
+          handled_at?: string | null
+          handled_by?: string | null
+          id?: string
+          kind?: string
+          paid_at?: string | null
+          payer_email?: string | null
+          payer_id?: string | null
+          payer_name?: string | null
+          payer_phone?: string | null
+          payment_contact_phone?: string | null
+          payment_method?: string | null
+          payment_ref?: string | null
+          payment_sender_name?: string | null
+          payment_submitted_at?: string | null
+          price_egp?: number
+          property_id?: string | null
+          property_title?: string
+          reach_goal?: number | null
+          sponsored_reel_id?: string | null
+          starts_at?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
+      promo_settings: {
+        Row: {
+          banner_price_14_egp: number
+          banner_price_30_egp: number
+          banner_price_7_egp: number
+          duration_days: number
+          featured_price_egp: number
+          id: boolean
+          intro_price_3000_egp: number
+          intro_price_5000_egp: number
+          updated_at: string
+        }
+        Insert: {
+          banner_price_14_egp?: number
+          banner_price_30_egp?: number
+          banner_price_7_egp?: number
+          duration_days?: number
+          featured_price_egp?: number
+          id?: boolean
+          intro_price_3000_egp?: number
+          intro_price_5000_egp?: number
+          updated_at?: string
+        }
+        Update: {
+          banner_price_14_egp?: number
+          banner_price_30_egp?: number
+          banner_price_7_egp?: number
+          duration_days?: number
+          featured_price_egp?: number
+          id?: boolean
+          intro_price_3000_egp?: number
+          intro_price_5000_egp?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ad_space_orders: {
+        Row: {
+          admin_note: string | null
+          banner_id: string | null
+          created_at: string
+          duration_days: number
+          ends_at: string | null
+          handled_at: string | null
+          handled_by: string | null
+          id: string
+          image_url: string
+          paid_at: string | null
+          payer_email: string | null
+          payer_id: string | null
+          payer_name: string | null
+          payer_phone: string | null
+          payment_contact_phone: string | null
+          payment_method: string | null
+          payment_ref: string | null
+          payment_sender_name: string | null
+          payment_submitted_at: string | null
+          price_egp: number
+          starts_at: string | null
+          status: string
+          title: string
+        }
+        Insert: {
+          admin_note?: string | null
+          banner_id?: string | null
+          created_at?: string
+          duration_days?: number
+          ends_at?: string | null
+          handled_at?: string | null
+          handled_by?: string | null
+          id?: string
+          image_url?: string
+          paid_at?: string | null
+          payer_email?: string | null
+          payer_id?: string | null
+          payer_name?: string | null
+          payer_phone?: string | null
+          payment_contact_phone?: string | null
+          payment_method?: string | null
+          payment_ref?: string | null
+          payment_sender_name?: string | null
+          payment_submitted_at?: string | null
+          price_egp?: number
+          starts_at?: string | null
+          status?: string
+          title?: string
+        }
+        Update: {
+          admin_note?: string | null
+          banner_id?: string | null
+          created_at?: string
+          duration_days?: number
+          ends_at?: string | null
+          handled_at?: string | null
+          handled_by?: string | null
+          id?: string
+          image_url?: string
+          paid_at?: string | null
+          payer_email?: string | null
+          payer_id?: string | null
+          payer_name?: string | null
+          payer_phone?: string | null
+          payment_contact_phone?: string | null
+          payment_method?: string | null
+          payment_ref?: string | null
+          payment_sender_name?: string | null
+          payment_submitted_at?: string | null
+          price_egp?: number
+          starts_at?: string | null
+          status?: string
+          title?: string
+        }
+        Relationships: []
+      }
+      music_tracks: {
+        Row: {
+          active: boolean
+          builtin_key: string | null
+          created_at: string
+          description: string | null
+          duration_sec: number | null
+          id: string
+          license_note: string | null
+          public_id: string | null
+          sort_order: number
+          title: string
+          url: string | null
+        }
+        Insert: {
+          active?: boolean
+          builtin_key?: string | null
+          created_at?: string
+          description?: string | null
+          duration_sec?: number | null
+          id?: string
+          license_note?: string | null
+          public_id?: string | null
+          sort_order?: number
+          title: string
+          url?: string | null
+        }
+        Update: {
+          active?: boolean
+          builtin_key?: string | null
+          created_at?: string
+          description?: string | null
+          duration_sec?: number | null
+          id?: string
+          license_note?: string | null
+          public_id?: string | null
+          sort_order?: number
+          title?: string
+          url?: string | null
+        }
+        Relationships: []
+      }
       known_provinces: {
         Row: {
           created_at: string
@@ -580,6 +1132,7 @@ export type Database = {
       }
       lives: {
         Row: {
+          rights_declared_at: string | null
           comments_hidden: boolean
           created_at: string
           duration_sec: number | null
@@ -601,6 +1154,7 @@ export type Database = {
           viewer_peak: number
         }
         Insert: {
+          rights_declared_at?: string | null
           comments_hidden?: boolean
           created_at?: string
           duration_sec?: number | null
@@ -622,6 +1176,7 @@ export type Database = {
           viewer_peak?: number
         }
         Update: {
+          rights_declared_at?: string | null
           comments_hidden?: boolean
           created_at?: string
           duration_sec?: number | null
@@ -983,6 +1538,14 @@ export type Database = {
           media: Json
           moderation_status: string
           music: string | null
+          closed_at: string | null
+          closed_type: string | null
+          rights_declared_at: string | null
+          comment_count: number
+          moderated_at: string | null
+          published_at: string | null
+          moderated_by: string | null
+          moderation_reason: string | null
           negotiable: boolean | null
           payment: string | null
           pinned: boolean
@@ -1022,6 +1585,14 @@ export type Database = {
           media?: Json
           moderation_status?: string
           music?: string | null
+          closed_at?: string | null
+          closed_type?: string | null
+          rights_declared_at?: string | null
+          comment_count?: number
+          moderated_at?: string | null
+          published_at?: string | null
+          moderated_by?: string | null
+          moderation_reason?: string | null
           negotiable?: boolean | null
           payment?: string | null
           pinned?: boolean
@@ -1061,6 +1632,14 @@ export type Database = {
           media?: Json
           moderation_status?: string
           music?: string | null
+          closed_at?: string | null
+          closed_type?: string | null
+          rights_declared_at?: string | null
+          comment_count?: number
+          moderated_at?: string | null
+          published_at?: string | null
+          moderated_by?: string | null
+          moderation_reason?: string | null
           negotiable?: boolean | null
           payment?: string | null
           pinned?: boolean
@@ -1597,6 +2176,149 @@ export type Database = {
     }
     Functions: {
       admin_has_permission: { Args: { section: string }; Returns: boolean }
+      admin_list_users: { Args: never; Returns: Json }
+      delete_my_account: { Args: never; Returns: undefined }
+      admin_delete_reel: { Args: { p_property_id: string; p_reason?: string }; Returns: undefined }
+      admin_delete_request: { Args: { p_request_id: string; p_reason?: string }; Returns: undefined }
+      submit_property_offer: {
+        Args: { p_message: string; p_price?: number; p_property_id: string; p_whatsapp?: string }
+        Returns: Database["public"]["Tables"]["property_offers"]["Row"]
+      }
+      respond_property_offer: { Args: { p_offer_id: string; p_status: string }; Returns: undefined }
+      submit_request_offer: {
+        Args: { p_message: string; p_price?: number; p_request_id: string; p_whatsapp?: string }
+        Returns: Database["public"]["Tables"]["request_offers"]["Row"]
+      }
+      respond_request_offer: { Args: { p_offer_id: string; p_status: string }; Returns: undefined }
+      admin_list_offers: {
+        Args: never
+        Returns: {
+          id: string
+          kind: string
+          target_id: string | null
+          target_title: string
+          asking_price: number | null
+          offer_price: number | null
+          status: string
+          message: string
+          offerer_id: string
+          offerer_name: string | null
+          offerer_phone: string | null
+          offerer_email: string | null
+          other_id: string
+          other_name: string | null
+          other_phone: string | null
+          other_email: string | null
+          chat_id: string | null
+          messages_count: number
+          created_at: string
+          updated_at: string
+        }[]
+      }
+      pin_reel_comment: { Args: { p_comment_id: string; p_pinned: boolean }; Returns: undefined }
+      mark_notification_read: { Args: { p_id: string }; Returns: undefined }
+      report_property_deal: {
+        Args: { p_deal_type: string; p_note?: string; p_property_id: string }
+        Returns: Database["public"]["Tables"]["property_deals"]["Row"]
+      }
+      admin_list_deals: {
+        Args: never
+        Returns: {
+          id: string
+          property_id: string | null
+          property_title: string
+          property_province: string | null
+          deal_type: string
+          fee_egp: number
+          status: string
+          reported_at: string
+          due_at: string | null
+          paid_at: string | null
+          payment_ref: string | null
+          note: string | null
+          admin_note: string | null
+          payer_id: string | null
+          payer_name: string | null
+          payer_phone: string | null
+          payer_email: string | null
+          payer_account_type: string | null
+          payment_sender_name: string | null
+          payment_sender_email: string | null
+          payment_contact_phone: string | null
+          payment_submitted_at: string | null
+          payment_method: string | null
+        }[]
+      }
+      confirm_deal_payment: {
+        Args: { p_contact_phone: string; p_deal_id: string; p_method: string; p_sender_name: string }
+        Returns: Database["public"]["Tables"]["property_deals"]["Row"]
+      }
+      create_ad_promotion: {
+        Args: { p_age_max?: number; p_age_min?: number; p_kind: string; p_property_id: string; p_reach_goal?: number }
+        Returns: Database["public"]["Tables"]["ad_promotions"]["Row"]
+      }
+      confirm_promotion_payment: {
+        Args: { p_contact_phone: string; p_id: string; p_method: string; p_sender_name: string }
+        Returns: Database["public"]["Tables"]["ad_promotions"]["Row"]
+      }
+      cancel_ad_promotion: { Args: { p_id: string }; Returns: undefined }
+      admin_set_admin_role: {
+        Args: { p_full_access?: boolean; p_make_admin: boolean; p_permissions?: string[]; p_user_id: string }
+        Returns: undefined
+      }
+      create_ad_space_order: {
+        Args: { p_duration_days: number; p_image_url: string; p_title?: string }
+        Returns: Database["public"]["Tables"]["ad_space_orders"]["Row"]
+      }
+      confirm_ad_space_payment: {
+        Args: { p_contact_phone: string; p_id: string; p_method: string; p_sender_name: string }
+        Returns: Database["public"]["Tables"]["ad_space_orders"]["Row"]
+      }
+      cancel_ad_space_order: { Args: { p_id: string }; Returns: undefined }
+      admin_update_ad_space_order: {
+        Args: { p_admin_note?: string; p_id: string; p_payment_ref?: string; p_status: string }
+        Returns: undefined
+      }
+      admin_list_ad_space_orders: {
+        Args: never
+        Returns: {
+          id: string; title: string; image_url: string; duration_days: number; price_egp: number; status: string
+          payment_method: string | null; payment_sender_name: string | null; payment_contact_phone: string | null
+          payment_submitted_at: string | null; payment_ref: string | null; admin_note: string | null
+          paid_at: string | null; starts_at: string | null; ends_at: string | null; created_at: string
+          payer_id: string | null; payer_name: string | null; payer_phone: string | null; payer_email: string | null
+        }[]
+      }
+      admin_update_promotion: {
+        Args: { p_admin_note?: string; p_id: string; p_payment_ref?: string; p_status: string }
+        Returns: undefined
+      }
+      admin_list_promotions: {
+        Args: never
+        Returns: {
+          id: string; property_id: string | null; property_title: string; kind: string; reach_goal: number | null
+          age_min: number | null; age_max: number | null; duration_days: number; price_egp: number; status: string
+          payment_method: string | null; payment_sender_name: string | null; payment_contact_phone: string | null
+          payment_submitted_at: string | null; payment_ref: string | null; admin_note: string | null
+          paid_at: string | null; starts_at: string | null; ends_at: string | null; created_at: string
+          payer_id: string | null; payer_name: string | null; payer_phone: string | null; payer_email: string | null
+          current_reach: number
+        }[]
+      }
+      submit_deal_payment: {
+        Args: { p_contact_phone: string; p_deal_id: string; p_sender_email: string; p_sender_name: string }
+        Returns: Database["public"]["Tables"]["property_deals"]["Row"]
+      }
+      admin_update_deal: {
+        Args: {
+          p_admin_note?: string
+          p_id: string
+          p_payment_ref?: string
+          p_reopen?: boolean
+          p_status: string
+        }
+        Returns: undefined
+      }
       bump_live_message_rate: {
         Args: {
           p_limit: number

@@ -24,7 +24,7 @@ export function ContentSettingsModal({ visible, onClose }: Props) {
         <Text style={styles.title}>{t("إعدادات المحتوى والإشعارات")}</Text>
         <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
           <Text style={styles.section}>{t("صفحة تفاصيل العقار")}</Text>
-          <SettingRow label={t("السماح بالدردشة من صفحة تفاصيل العقار")} settingKey="chatOnProperties" settings={settings} onToggle={toggleSetting} />
+          {/* ↔ خيار «السماح بالدردشة من صفحة تفاصيل العقار» اتشال: زر الشات اتلغى والمحادثة بقت من التعليقات (العمود chat_on_properties فى DB لسه موجود ومش مستخدم). */}
           <SettingRow label={t("إظهار رقم الواتساب")} settingKey="showWhatsapp" settings={settings} onToggle={toggleSetting} />
           <SettingRow label={t("إظهار زر الاتصال")} settingKey="showCallButton" settings={settings} onToggle={toggleSetting} />
 

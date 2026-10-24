@@ -10,7 +10,7 @@
     "backgroundColor": "#EFEBE3",
     "primaryColor": "#22A652",
     "assetBundlePatterns": [
-      "**/*"
+      "assets/**/*"
     ],
     "updates": {
       "url": "https://u.expo.dev/8ffe0bd5-4c33-4f68-9101-78feca84d328",
@@ -46,28 +46,28 @@
       [
         "@config-plugins/react-native-webrtc",
         {
-          "cameraPermission": "يحتاج ديارينو للوصول إلى الكاميرا لبدء بث مباشر لعقارك.",
-          "microphonePermission": "يحتاج ديارينو للوصول إلى الميكروفون أثناء البث المباشر."
+          "cameraPermission": "يحتاج باراندا للوصول إلى الكاميرا لبدء بث مباشر لعقارك.",
+          "microphonePermission": "يحتاج باراندا للوصول إلى الميكروفون أثناء البث المباشر."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "يحتاج ديارينو للوصول إلى الكاميرا لبدء بث مباشر لعقارك.",
-          "microphonePermission": "يحتاج ديارينو للوصول إلى الميكروفون أثناء البث المباشر."
+          "cameraPermission": "يحتاج باراندا للوصول إلى الكاميرا لبدء بث مباشر لعقارك.",
+          "microphonePermission": "يحتاج باراندا للوصول إلى الميكروفون أثناء البث المباشر."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "يحتاج ديارينو للوصول لموقعك لعرض العقارات القريبة منك ضمن نطاق تختاره."
+          "locationWhenInUsePermission": "يحتاج باراندا للوصول لموقعك لعرض العقارات القريبة منك ضمن نطاق تختاره."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "يحتاج ديارينو للوصول إلى الصور لإرفاقها في المحادثات وعند نشر إعلانك.",
-          "cameraPermission": "يحتاج ديارينو للوصول إلى الكاميرا لالتقاط صور لعقارك."
+          "photosPermission": "يحتاج باراندا للوصول إلى الصور لإرفاقها في المحادثات وعند نشر إعلانك.",
+          "cameraPermission": "يحتاج باراندا للوصول إلى الكاميرا لالتقاط صور لعقارك."
         }
       ],
       [
@@ -100,11 +100,11 @@
         "applinks:diarino.app"
       ],
       "infoPlist": {
-        "NSCameraUsageDescription": "يحتاج ديارينو للوصول إلى الكاميرا لبدء بث مباشر لعقارك.",
-        "NSMicrophoneUsageDescription": "يحتاج ديارينو للوصول إلى الميكروفون أثناء البث المباشر ولتسجيل الفيديوهات.",
-        "NSLocationWhenInUseUsageDescription": "يحتاج ديارينو للوصول لموقعك لعرض العقارات القريبة منك ضمن نطاق تختاره.",
-        "NSPhotoLibraryUsageDescription": "يحتاج ديارينو للوصول إلى مكتبة الصور لإرفاقها في المحادثات وعند نشر إعلانك.",
-        "NSPhotoLibraryAddUsageDescription": "يحتاج ديارينو إلى حفظ الصور والتسجيلات في البوم الصور.",
+        "NSCameraUsageDescription": "يحتاج باراندا للوصول إلى الكاميرا لبدء بث مباشر لعقارك.",
+        "NSMicrophoneUsageDescription": "يحتاج باراندا للوصول إلى الميكروفون أثناء البث المباشر ولتسجيل الفيديوهات.",
+        "NSLocationWhenInUseUsageDescription": "يحتاج باراندا للوصول لموقعك لعرض العقارات القريبة منك ضمن نطاق تختاره.",
+        "NSPhotoLibraryUsageDescription": "يحتاج باراندا للوصول إلى مكتبة الصور لإرفاقها في المحادثات وعند نشر إعلانك.",
+        "NSPhotoLibraryAddUsageDescription": "يحتاج باراندا إلى حفظ الصور والتسجيلات في البوم الصور.",
         "UIBackgroundModes": [
           "audio",
           "voip",

@@ -28,8 +28,8 @@ export function PropertyDetailsContent({ property }: { property: Property }) {
   return (
     <View style={styles.content}>
       <View style={styles.row}>
-        <View style={[styles.purposeTag, { backgroundColor: property.purpose === "sale" ? "#22A652" : "#F4673F" }]}>
-          <Text style={styles.purposeTagText}>{property.purpose === "sale" ? t("للبيع") : t("للإيجار")}</Text>
+        <View style={[styles.purposeTag, { backgroundColor: property.closedType ? "#B91C1C" : property.purpose === "sale" ? "#22A652" : "#F4673F" }]}>
+          <Text style={styles.purposeTagText}>{property.closedType ? (property.closedType === "rented" ? t("تم الإيجار") : t("تم البيع")) : property.purpose === "sale" ? t("للبيع") : t("للإيجار")}</Text>
         </View>
         <Text style={styles.typeText}>{t(property.type)}</Text>
       </View>

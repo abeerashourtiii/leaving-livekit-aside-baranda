@@ -12,6 +12,9 @@ type ChatRow = {
   id: string; property_id: string | null; request_id: string | null;
   initiator_id: string; partner_id: string; created_at: string;
   initiator: ProfileRow | null; partner: ProfileRow | null;
+  // ↔ سياق المحادثة (عنوان الإعلان/الطلب) — بيرجع null لو الإعلان اتخفى/اتقفل أو اتحذف.
+  property: { short_title: string | null; title: string | null; price: number | null; purpose: string | null } | null;
+  request: { type: string | null; location: string | null; purpose: string | null } | null;
 };
 type MessageRow = {
   id: string; chat_id: string; sender_id: string; text: string; images: string[] | null;
@@ -27,12 +30,17 @@ export type ChatSummary = {
   requestId: string | null;
   lastMessage: string;
   unread: number;
+  // ↔ وقت آخر نشاط (آخر رسالة أو إنشاء المحادثة): صفحة «العروض» بترتّب بيه — المحادثة الأحدث فى الأعلى.
+  lastMessageAt: string;
+  lastMessageFromMe: boolean;
+  propertyTitle: string | null;
+  requestTitle: string | null;
 };
 
 async function fetchChatList(userId: string): Promise<ChatSummary[]> {
   const { data: chats, error } = await supabase
     .from("chats")
-    .select("*, initiator:profiles!chats_initiator_profile_fkey(id,full_name), partner:profiles!chats_partner_profile_fkey(id,full_name)")
+    .select("*, initiator:profiles!chats_initiator_profile_fkey(id,full_name), partner:profiles!chats_partner_profile_fkey(id,full_name), property:properties!chats_property_id_fkey(short_title,title,price,purpose), request:requests!chats_request_id_fkey(type,location,purpose)")
     .or(`initiator_id.eq.${userId},partner_id.eq.${userId}`)
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -63,8 +71,14 @@ async function fetchChatList(userId: string): Promise<ChatSummary[]> {
       requestId: r.request_id,
       lastMessage: last?.text || "",
       unread,
+      lastMessageAt: last?.created_at ?? r.created_at,
+      lastMessageFromMe: !!last && last.sender_id === userId,
+      propertyTitle: r.property ? (r.property.short_title || r.property.title || null) : null,
+      requestTitle: r.request ? [r.request.type, r.request.location].filter(Boolean).join(" - ") || null : null,
     };
-  });
+  })
+    // المحادثة الأحدث (آخر رسالة) فى الأعلى.
+    .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
 }
 
 export function useChatList(userId: string | undefined) {
@@ -177,6 +191,10 @@ export function useMarkChatRead() {
       const { error } = await supabase.rpc("mark_chat_messages_read", { p_chat_id: chatId });
       if (error) throw error;
     },
-    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: ["chats", vars.currentUserId] }),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ["chats", vars.currentUserId] });
+      // النقطة الحمراء على أيقونة «العروض» بتختفى بعد فتح المحادثة.
+      void qc.invalidateQueries({ queryKey: ["offers", "unread"] });
+    },
   });
 }

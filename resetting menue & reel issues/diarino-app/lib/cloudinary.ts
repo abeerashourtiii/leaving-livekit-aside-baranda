@@ -24,6 +24,9 @@ const VIDEO_PRESET = process.env.EXPO_PUBLIC_CLOUDINARY_VIDEO_PRESET || "Diarino
 const IMAGE_PRESET = process.env.EXPO_PUBLIC_CLOUDINARY_IMAGE_PRESET || "Diarino_images";
 // presets بديلة للصور لو الأساسى مش موجود (بتتجرّب بالترتيب)
 const IMAGE_FALLBACK_PRESETS = ["ml_default"];
+// ↔ مقاطع المكتبة الموسيقية (صوت فقط): preset خاص Unsigned وبدون Incoming transformation للفيديو (720p) —
+// لو مش موجود بنرجع لـ preset الفيديو. الإعداد فى docs/cloudinary-music-preset.md.
+const MUSIC_PRESET = process.env.EXPO_PUBLIC_CLOUDINARY_MUSIC_PRESET || "Diarino_music";
 
 // ↔ أخطاء رفع معروفة بمعنى واضح للمستخدم/الأدمن (الواجهات بتعرض message كما هى).
 export class CloudinaryUploadError extends Error {
@@ -76,14 +79,17 @@ export function isVideoUrl(url: string | null | undefined): boolean {
 // البروفايل/الشات/الأدمن) متأثرتش.
 export async function uploadToCloudinary(
   uri: string,
-  type: "image" | "video",
+  rawType: "image" | "video" | "audio",
   onProgress?: (ratio: number) => void
 ): Promise<CloudinaryUploadResult> {
+  // ↔ الصوت بيترفع على Cloudinary كـ resource_type "video" (Cloudinary مفيهاش نوع audio منفصل).
+  const type: "image" | "video" = rawType === "image" ? "image" : "video";
+  const isAudio = rawType === "audio";
   const endpoint = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${type}/upload`;
 
   const filename = uri.split("/").pop() || `upload.${type === "video" ? "mp4" : "jpg"}`;
   const ext = (filename.split(".").pop() || (type === "video" ? "mp4" : "jpg")).toLowerCase();
-  const mime = type === "video" ? `video/${ext}` : `image/${ext === "jpg" ? "jpeg" : ext}`;
+  const mime = isAudio ? `audio/${ext === "mp3" ? "mpeg" : ext}` : type === "video" ? `video/${ext}` : `image/${ext === "jpg" ? "jpeg" : ext}`;
 
   // ↔ بنجهّز الملف مرة واحدة، وبنبنى FormData جديد لكل محاولة preset (الملف على الويب Blob، وعلى الموبايل
   //   {uri,type,name} بيتبعت من الـ URI نفسه فى كل محاولة).
@@ -136,7 +142,7 @@ export async function uploadToCloudinary(
 
   // ↔ الصور: preset الصور أولًا، ولو مش موجود أو بيحوّل الصور لفيديو نجرّب "ml_default" (preset Unsigned
   // افتراضى بيتعمل مع أى حساب Cloudinary) قبل ما نفشل برسالة واضحة. الفيديو: preset الفيديو بس.
-  const presets = type === "image" ? [IMAGE_PRESET, ...IMAGE_FALLBACK_PRESETS.filter((p) => p !== IMAGE_PRESET)] : [VIDEO_PRESET];
+  const presets = type === "image" ? [IMAGE_PRESET, ...IMAGE_FALLBACK_PRESETS.filter((p) => p !== IMAGE_PRESET)] : isAudio ? [MUSIC_PRESET, VIDEO_PRESET] : [VIDEO_PRESET];
 
   let ok = false;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -146,7 +152,7 @@ export async function uploadToCloudinary(
     ({ ok, json } = await send(presets[i]));
     const last = i === presets.length - 1;
     if (!ok) {
-      if (type === "image" && isPresetMissing(json)) { lastFailure = "missing"; if (!last) continue; }
+      if ((type === "image" || isAudio) && isPresetMissing(json)) { lastFailure = "missing"; if (!last) continue; }
       else lastFailure = "other";
       break;
     }
@@ -159,7 +165,7 @@ export async function uploadToCloudinary(
     break;
   }
   if (!ok) {
-    if (lastFailure === "missing") throw new CloudinaryUploadError("image_preset_missing", IMAGE_PRESET_MISSING_MESSAGE);
+    if (lastFailure === "missing" && !isAudio) throw new CloudinaryUploadError("image_preset_missing", IMAGE_PRESET_MISSING_MESSAGE);
     if (lastFailure === "converted") throw new CloudinaryUploadError("image_preset_converts_to_video", IMAGE_PRESET_CONVERTS_MESSAGE);
     throw new Error(json?.error?.message || "تعذر الرفع إلى Cloudinary");
   }
@@ -170,7 +176,7 @@ export async function uploadToCloudinary(
     width: json.width ?? null,
     height: json.height ?? null,
     duration: json.duration ?? null,
-    thumbnailUrl: type === "video" ? cldVideoThumbnail(json.secure_url) : null,
+    thumbnailUrl: type === "video" && !isAudio ? cldVideoThumbnail(json.secure_url) : null,
     format: json.format,
     bytes: json.bytes,
   };

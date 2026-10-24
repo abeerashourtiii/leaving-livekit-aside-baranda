@@ -10,6 +10,7 @@ import { reelPagingProps } from "../../../lib/reelPaging";
 import { SnapCell } from "../../../components/reel/SnapCell";
 import { useReelHeight } from "../../../lib/uiConstants";
 import { useReelPreferences } from "../../../lib/hooks/useReelPreferences";
+import { useReelSheetLocked } from "../../../lib/reelSheetLock";
 import { ReelCard } from "../../../components/reel/ReelCard";
 import { useFollows } from "../../../lib/hooks/useFollows";
 import { useFavorites } from "../../../lib/hooks/useFavorites";
@@ -18,6 +19,7 @@ import { useCompareSelection } from "../../../lib/hooks/useCompareSelection";
 import { showToast } from "../../../components/shared/Toast";
 import { ReportModal } from "../../../components/shared/ReportModal";
 import { useLanguage } from "../../../lib/hooks/useLanguage";
+import { useReelPlaylist } from "../../../lib/reelPlaylist";
 import { useThemeColors, ThemeColors } from "../../../lib/hooks/useThemeColors";
 
 // ↔ إصلاح "الضغط على عقار فى صفحة البحث كان بيودّي لصفحة التفاصيل
@@ -38,10 +40,17 @@ import { useThemeColors, ThemeColors } from "../../../lib/hooks/useThemeColors";
 // لأسفل للى قبله، من غير تخطّى (lib/reelPaging.ts). من غير sellerId (مثلًا من
 // البحث) بتعرض ريل واحد زى الأول.
 export default function PropertyReelScreen() {
-  const { id, sellerId } = useLocalSearchParams<{ id: string; sellerId?: string }>();
+  const { id, sellerId, list, details, comments } = useLocalSearchParams<{ id: string; sellerId?: string; list?: string; details?: string; comments?: string }>();
   const sellerIdParam = Array.isArray(sellerId) ? sellerId[0] : sellerId;
+  const listParam = Array.isArray(list) ? list[0] : list;
+  // ↔ تصفّح نتائج البحث ريل بريل (?list=search) — القائمة بتيجي من lib/reelPlaylist.ts.
+  if (listParam === "search" && id) return <PlaylistReelsViewer listKey="search" startId={id} />;
   if (sellerIdParam && id) return <SellerReelsViewer sellerId={sellerIdParam} startId={id} />;
-  return <SingleReelScreen id={id} />;
+  // ↔ ?details=1 (من إشعارات الإعجاب/الحفظ): الريل يفتح شغّال ولوحة التفاصيل مفتوحة تحته.
+  const detailsParam = Array.isArray(details) ? details[0] : details;
+  // ↔ ?comments=1 (من إشعارات التعليقات/الردود): الريل يفتح شغّال ولوحة التعليقات مفتوحة تحته.
+  const commentsParam = Array.isArray(comments) ? comments[0] : comments;
+  return <SingleReelScreen id={id} openDetails={detailsParam === "1"} openComments={commentsParam === "1"} />;
 }
 
 function goBackOrHome() {
@@ -75,7 +84,28 @@ function SellerReelsViewer({ sellerId, startId }: { sellerId: string; startId: s
   return <ReelsPager items={items} startIndex={initialIndexRef.current} />;
 }
 
-function ReelsPager({ items, startIndex }: { items: Property[]; startIndex: number }) {
+// ↔ تصفّح قائمة تشغيل (نتائج البحث): الترتيب بيتثبّت لحظة الفتح (فأى تحديث/إعادة جلب مايحرّكش الريل النشط)،
+// والنتائج الجديدة (الصفحات التالية) بتتضاف فى الآخر فقط. لو القائمة مش موجودة (مثلًا تحديث صفحة الويب)
+// أو العقار مش فيها، بيفتح الريل المنفرد زى الأول.
+function PlaylistReelsViewer({ listKey, startId }: { listKey: string; startId: string }) {
+  const playlist = useReelPlaylist(listKey);
+  const orderRef = useRef<string[]>([]);
+  const byIdRef = useRef<Map<string, Property>>(new Map());
+  const startIndexRef = useRef<number | null>(null);
+
+  for (const p of playlist.items) {
+    byIdRef.current.set(p.id, p);
+    if (!orderRef.current.includes(p.id)) orderRef.current.push(p.id);
+  }
+  const items = orderRef.current.map((pid) => byIdRef.current.get(pid)!).filter(Boolean);
+  if (startIndexRef.current === null && items.length > 0) {
+    startIndexRef.current = items.findIndex((p) => p.id === startId);
+  }
+  if (startIndexRef.current === null || startIndexRef.current < 0) return <SingleReelScreen id={startId} />;
+  return <ReelsPager items={items} startIndex={startIndexRef.current} onEndReached={playlist.loadMore ?? undefined} />;
+}
+
+function ReelsPager({ items, startIndex, onEndReached }: { items: Property[]; startIndex: number; onEndReached?: () => void }) {
   const { t } = useLanguage();
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
@@ -85,6 +115,7 @@ function ReelsPager({ items, startIndex }: { items: Property[]; startIndex: numb
   const { favoriteProperties, toggleFavoriteProperty } = useFavorites();
   const { likedIds, toggleLike } = useLikes();
   const compareSelection = useCompareSelection();
+  const commentsLocked = useReelSheetLocked();
 
   const [activeIndex, setActiveIndex] = useState(startIndex);
   const activeIndexRef = useRef(startIndex);
@@ -150,9 +181,11 @@ function ReelsPager({ items, startIndex }: { items: Property[]; startIndex: numb
         renderItem={renderItem}
         extraData={{ activeIndex, detailsOpenId, followedIds, favoriteProperties, likedIds, ids: compareSelection.ids }}
         {...reelPagingProps(reelHeight)}
-        scrollEnabled={!detailsOpenId}
+        scrollEnabled={!detailsOpenId && !commentsLocked}
         showsVerticalScrollIndicator={false}
         initialScrollIndex={startIndex}
+        onEndReached={onEndReached}
+        onEndReachedThreshold={1.5}
         getItemLayout={(_, index) => ({ length: reelHeight, offset: reelHeight * index, index })}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
@@ -180,7 +213,7 @@ function ReelsPager({ items, startIndex }: { items: Property[]; startIndex: numb
   );
 }
 
-function SingleReelScreen({ id }: { id: string | undefined }) {
+function SingleReelScreen({ id, openDetails = false, openComments = false }: { id: string | undefined; openDetails?: boolean; openComments?: boolean }) {
   const { t } = useLanguage();
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
@@ -191,7 +224,7 @@ function SingleReelScreen({ id }: { id: string | undefined }) {
   const { likedIds, toggleLike } = useLikes();
   const compareSelection = useCompareSelection();
 
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(openDetails);
   const [reportVisible, setReportVisible] = useState(false);
 
   if (isLoading) {
@@ -227,6 +260,7 @@ function SingleReelScreen({ id }: { id: string | undefined }) {
         detailsOpen={detailsOpen}
         onCloseDetails={() => setDetailsOpen(false)}
         onOpenDetails={() => setDetailsOpen(true)}
+        initialCommentsOpen={openComments}
         onOpenSeller={(sellerId) => router.push(`/seller/${sellerId}`)}
         onToggleFollow={(sellerId) => toggleFollow(sellerId)}
         onToggleFavorite={(propertyId) => toggleFavoriteProperty(propertyId)}

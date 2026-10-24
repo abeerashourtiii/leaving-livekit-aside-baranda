@@ -18,8 +18,11 @@ import { MediaItem, Purpose } from "../../lib/types";
 import { usePropertyById, useCreateProperty, useUpdateProperty, useMyProperties } from "../../lib/hooks/useProperties";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useLanguage } from "../../lib/hooks/useLanguage";
+import { useDealSettings } from "../../lib/hooks/useDeals";
 import { supabase } from "../../lib/supabase";
 import { uploadToCloudinary } from "../../lib/cloudinary";
+import { useMusicLibrary, resolveMusicSource } from "../../lib/musicLibrary";
+import { startMusicPreview, stopMusicPreview } from "../../lib/musicPlayer";
 import { compressVideoForUpload, willCompressVideo, clearCompressedVideoCache, VideoMeta } from "../../lib/videoCompress";
 import { acquireKeepAwake, releaseKeepAwake } from "../../lib/keepAwake";
 import { UploadProgressModal, UploadPhase } from "../../components/publish/UploadProgressModal";
@@ -37,20 +40,16 @@ const FEATURES = [
   "حديقة", "جراج", "أمن وحراسة", "مطبخ مجهز", "مصعد", "حمام سباحة", "تراس",
   "مفروش", "مكيف", "خط أرضي", "عداد كهرباء", "عداد مياه", "عداد غاز طبيعي",
 ];
-const MUSIC_OPTIONS = [
-  { key: "Uplifting Corporate", note: "🎵", desc: "موسيقى حماسية" },
-  { key: "Chill Lounge", note: "🎶", desc: "هادئة وعصرية" },
-  { key: "Acoustic Morning", note: "🎸", desc: "جيتار هادئ" },
-  { key: "Oriental Vibes", note: "🪕", desc: "شرقية خفيفة" },
-  { key: "Modern Beat", note: "🥁", desc: "إيقاع عصري" },
-];
-// ↔ حدود الفيديو (قرار المنتج): 180 ثانية كحد أقصى للمدة، و600MB كحد أقصى
+// ↔ حدود الفيديو (قرار المنتج): 300 ثانية (٥ دقائق) كحد أقصى للمدة، و600MB كحد أقصى
 // للحجم قبل الرفع (أندرويد/آيفون). ⚠ لازم يكون سقف فيديو خطة Cloudinary عندك
 // (وسقف الطلب الواحد فى الـ upload API) >= الرقم ده، وإلا الرفع هيفشل من
 // Cloudinary بعد وقت الرفع — لو حصل ده قلّل الثابت أو انقل الرفع لـ chunked
 // upload (شوف docs/video-pipeline.md). أي فيديو بيعدّي عبر الـ Incoming
 // transformation على الـ preset (720p H.264) فالحجم الفعلي بعد الرفع أصغر بكتير.
-const MAX_VIDEO_SEC = 3 * 60;
+// ↔ مسارا الوسائط (يختار المستخدم واحد منهم): فيديو (+ غلاف اختياري/لقطة عشوائية) أو حتى MAX_PHOTOS صورة بتتعرض فى
+// الريل تلقائيًا بشكل تتابعى (slideshow) مع صورة رئيسية هى واجهة كارت الريل وأول صورة فى العرض.
+const MAX_PHOTOS = 15;
+const MAX_VIDEO_SEC = 5 * 60;
 const MAX_VIDEO_BYTES = 600 * 1024 * 1024;
 
 export default function CreateListingScreen() {
@@ -103,11 +102,48 @@ export default function CreateListingScreen() {
   // حالة مؤشر الضغط/الرفع (null = مفيش عملية شغالة).
   const [uploadUi, setUploadUi] = useState<{ phase: UploadPhase; value: number; withCompression: boolean } | null>(null);
   const [coverItem, setCoverItem] = useState<MediaItem | null>(null);
+  const [mediaMode, setMediaMode] = useState<"video" | "photos">("video");
+  const [photoItems, setPhotoItems] = useState<MediaItem[]>([]);
+  const [mainPhotoUrl, setMainPhotoUrl] = useState<string | null>(null);
   const [music, setMusic] = useState("");
+  // ↔ مكتبة الموسيقى مخفية لحد ما المستخدم يضغط عليها، وكل مقطع له زر معاينة (▶) قبل الاختيار.
+  const { tracks: musicTracks } = useMusicLibrary();
+  const [musicOpen, setMusicOpen] = useState(false);
+  const [previewingTitle, setPreviewingTitle] = useState<string | null>(null);
   const [phone, setPhone] = useState<PhoneInputValue>({ countryIso2: "", localNumber: "" });
   const [sharePlatforms, setSharePlatforms] = useState<Set<SocialPlatform>>(new Set());
   const [errors, setErrors] = useState<Set<string>>(new Set());
+  // ↔ إقرار ملكية حقوق الوسائط (سياسة حقوق النشر / نشر الصور والفيديو) — إلزامى عند نشر إعلان جديد وعند تعديل إعلان قائم، ووقته بيتسجّل فى properties.rights_declared_at.
+  const [rightsAccepted, setRightsAccepted] = useState(false);
+  const { settings: dealSettings } = useDealSettings();
   const scrollRef = useRef<ScrollView>(null);
+
+  // وقف معاينة الموسيقى عند الخروج من الصفحة.
+  useEffect(() => () => { void stopMusicPreview(); }, []);
+
+  async function togglePreview(title: string) {
+    if (previewingTitle === title) {
+      await stopMusicPreview();
+      setPreviewingTitle(null);
+      return;
+    }
+    const source = resolveMusicSource(title, musicTracks);
+    if (!source) return;
+    setPreviewingTitle(title);
+    const ok = await startMusicPreview(source, () => setPreviewingTitle((cur) => (cur === title ? null : cur)));
+    if (!ok) {
+      setPreviewingTitle((cur) => (cur === title ? null : cur));
+      showToast(t("تعذر تشغيل المقطع الموسيقي."));
+    }
+  }
+
+  function toggleMusicOpen() {
+    if (musicOpen) {
+      void stopMusicPreview();
+      setPreviewingTitle(null);
+    }
+    setMusicOpen((o) => !o);
+  }
 
   // تحميل بيانات الإعلان عند التعديل
   useEffect(() => {
@@ -130,8 +166,16 @@ export default function CreateListingScreen() {
     setNegotiable(editingAd.negotiable === undefined ? "" : editingAd.negotiable ? "yes" : "no");
     setShortTitle(editingAd.shortTitle || editingAd.title);
     setDescription(editingAd.description);
-    setVideoItem(editingAd.media.find((m) => m.type === "video") ?? null);
-    setCoverItem(editingAd.media.find((m) => m.type === "image") ?? null);
+    const editVideo = editingAd.media.find((m) => m.type === "video") ?? null;
+    const editImages = editingAd.media.filter((m) => m.type === "image");
+    setVideoItem(editVideo);
+    setCoverItem(editImages[0] ?? null);
+    if (!editVideo && editImages.length > 0) {
+      // ↔ إعلان بالصور: نرجّع مسار الصور بنفس الترتيب والصورة الرئيسية (الغلاف المحفوظ).
+      setMediaMode("photos");
+      setPhotoItems(editImages.slice(0, MAX_PHOTOS));
+      setMainPhotoUrl(editingAd.coverImage && editImages.some((m) => m.url === editingAd.coverImage) ? editingAd.coverImage : editImages[0].url);
+    }
     setMusic(editingAd.music || "");
     const split = editingAd.seller.phone ? splitE164(editingAd.seller.phone) : null;
     setPhone(split ? { countryIso2: split.countryIso2, localNumber: split.localNumber } : { countryIso2: "", localNumber: "" });
@@ -162,6 +206,9 @@ export default function CreateListingScreen() {
     if (d.description !== undefined) setDescription(d.description);
     if (d.videoItem !== undefined) setVideoItem(d.videoItem);
     if (d.coverItem !== undefined) setCoverItem(d.coverItem);
+    if (d.mediaMode === "video" || d.mediaMode === "photos") setMediaMode(d.mediaMode);
+    if (Array.isArray(d.photoItems)) setPhotoItems(d.photoItems.slice(0, MAX_PHOTOS));
+    if (d.mainPhotoUrl !== undefined) setMainPhotoUrl(d.mainPhotoUrl);
     if (d.music !== undefined) setMusic(d.music);
     if (d.phone !== undefined) setPhone(d.phone);
     if (d.sharePlatforms && Array.isArray(d.sharePlatforms)) setSharePlatforms(new Set(d.sharePlatforms));
@@ -172,7 +219,7 @@ export default function CreateListingScreen() {
     return {
       purpose, type, province, location, price, area, rooms, baths, reception, floor,
       payment, negotiable, features: Array.from(features), finishType, status, deliveryDate,
-      shortTitle, description, videoItem, coverItem, music, phone, sharePlatforms: Array.from(sharePlatforms),
+      shortTitle, description, videoItem, coverItem, mediaMode, photoItems, mainPhotoUrl, music, phone, sharePlatforms: Array.from(sharePlatforms),
     };
   }
 
@@ -224,7 +271,7 @@ export default function CreateListingScreen() {
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
     if (asset.duration && asset.duration / 1000 > MAX_VIDEO_SEC) {
-      Alert.alert(t("الفيديو طويل جدًا"), t("الحد الأقصى لمدة الفيديو ٣ دقائق."));
+      Alert.alert(t("الفيديو طويل جدًا"), t("الحد الأقصى لمدة الفيديو ٥ دقائق."));
       return;
     }
     // fileSize بيرجع على أندرويد/آيفون؛ على الويب ممكن يبقى undefined فبنتخطى الفحص.
@@ -244,6 +291,36 @@ export default function CreateListingScreen() {
     });
     if (result.canceled || !result.assets[0]) return;
     setCoverItem({ type: "image", url: result.assets[0].uri });
+  }
+
+  // ↔ اختيار صور الإعلان (حتى MAX_PHOTOS): اختيار متعدد من المعرض (أندرويد/آيفون/الويب). الزيادة عن الحد بتتقصّ مع تنبيه.
+  async function pickPhotos() {
+    const remaining = MAX_PHOTOS - photoItems.length;
+    if (remaining <= 0) {
+      showToast(t("وصلت للحد الأقصى: ١٥ صورة."));
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
+      quality: 0.8,
+    });
+    if (result.canceled || result.assets.length === 0) return;
+    const existing = new Set(photoItems.map((p) => p.url));
+    const fresh = result.assets.filter((a) => !existing.has(a.uri)).map<MediaItem>((a) => ({ type: "image", url: a.uri }));
+    const accepted = fresh.slice(0, remaining);
+    if (fresh.length > remaining) showToast(t("الحد الأقصى ١٥ صورة، تمت إضافة الصور المتاحة فقط."));
+    if (accepted.length === 0) return;
+    setPhotoItems((prev) => [...prev, ...accepted]);
+    setMainPhotoUrl((prev) => prev ?? accepted[0].url);
+    setErrors((e) => { const n = new Set(e); n.delete("media"); return n; });
+  }
+
+  function removePhoto(url: string) {
+    const next = photoItems.filter((p) => p.url !== url);
+    setPhotoItems(next);
+    if (mainPhotoUrl === url) setMainPhotoUrl(next[0]?.url ?? null);
   }
 
   async function generateCoverFromVideo(videoUri: string): Promise<MediaItem | null> {
@@ -295,11 +372,34 @@ export default function CreateListingScreen() {
     return uploaded;
   }
 
+  // ↔ رفع صور الإعلان: 3 فى نفس الوقت (بنفس ترتيب القائمة، الرئيسية أولًا) مع مؤشر تقدّم بعدد الصور المرفوعة.
+  async function uploadPhotos(sellerId: string, items: MediaItem[]): Promise<MediaItem[]> {
+    const out: MediaItem[] = new Array(items.length);
+    let done = 0;
+    const CONCURRENCY = 3;
+    for (let i = 0; i < items.length; i += CONCURRENCY) {
+      await Promise.all(
+        items.slice(i, i + CONCURRENCY).map(async (item, k) => {
+          if (/^https?:\/\//.test(item.url)) {
+            out[i + k] = item;
+          } else {
+            const result = await uploadToCloudinary(item.url, "image");
+            logMedia.mutate({ ownerId: sellerId, type: "image", context: "property", result });
+            out[i + k] = { type: "image", url: result.url };
+          }
+          done += 1;
+          setPhaseProgress("upload", done / items.length, false);
+        })
+      );
+    }
+    return out;
+  }
+
   const FIELD_LABELS: Record<string, string> = {
     purpose: "الغرض (بيع/إيجار)", type: "نوع العقار", province: "المحافظة", location: "المنطقة",
     price: "السعر", area: "المساحة", rooms: "عدد الغرف", baths: "عدد الحمامات", reception: "الريسبشن",
     floor: "الدور", payment: "طريقة الدفع", negotiable: "قابل للتفاوض", status: "حالة العقار",
-    shortTitle: "العنوان المختصر", description: "الوصف", media: "فيديو العقار", music: "موسيقى الإعلان", phone: "رقم الهاتف",
+    shortTitle: "العنوان المختصر", description: "الوصف", media: mediaMode === "video" ? "فيديو العقار" : "صور العقار", music: "موسيقى الإعلان", phone: "رقم الهاتف", rights: "إقرار ملكية الحقوق",
   };
 
   function validate(): boolean {
@@ -319,8 +419,9 @@ export default function CreateListingScreen() {
     if (!status) errs.add("status");
     if (!shortTitle.trim()) errs.add("shortTitle");
     if (!description.trim()) errs.add("description");
-    if (!videoItem) errs.add("media");
+    if (mediaMode === "video" ? !videoItem : photoItems.length === 0) errs.add("media");
     if (!phone.countryIso2 || !validateAndFormatPhone(phone.localNumber, phone.countryIso2).valid) errs.add("phone");
+    if (!rightsAccepted) errs.add("rights");
     setErrors(errs);
     if (errs.size > 0) {
       scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -331,22 +432,33 @@ export default function CreateListingScreen() {
   }
 
   async function submit() {
-    if (!validate() || !videoItem) return;
+    if (!validate()) return;
+    if (mediaMode === "video" && !videoItem) return;
     if (!user) return;
 
     setSubmitting(true);
     acquireKeepAwake(); // الشاشة ماتنطفيش أثناء الضغط/الرفع الطويل
     try {
-      const cover = coverItem ?? (await generateCoverFromVideo(videoItem.url));
-      const rawMedia: MediaItem[] = [
-        videoItem,
-        ...(cover ? [cover] : []),
-      ];
-      // مرحلة "ضغط الفيديو" بتظهر فى المؤشر بس لو هتحصل فعلًا (أندرويد + فيديو محتاج ضغط).
-      const withCompression = !/^https?:\/\//.test(videoItem.url) && willCompressVideo(videoMeta ?? {});
-      setPhaseProgress(withCompression ? "compress" : "upload", 0, withCompression);
-      const uploadedMedia = await uploadLocalMedia(user.id, rawMedia, withCompression);
-      setUploadUi((prev) => ({ phase: "publish", value: 1, withCompression: prev?.withCompression ?? withCompression }));
+      let uploadedMedia: MediaItem[];
+      if (mediaMode === "video" && videoItem) {
+        const cover = coverItem ?? (await generateCoverFromVideo(videoItem.url));
+        const rawMedia: MediaItem[] = [
+          videoItem,
+          ...(cover ? [cover] : []),
+        ];
+        // مرحلة "ضغط الفيديو" بتظهر فى المؤشر بس لو هتحصل فعلًا (أندرويد + فيديو محتاج ضغط).
+        const withCompression = !/^https?:\/\//.test(videoItem.url) && willCompressVideo(videoMeta ?? {});
+        setPhaseProgress(withCompression ? "compress" : "upload", 0, withCompression);
+        uploadedMedia = await uploadLocalMedia(user.id, rawMedia, withCompression);
+        setUploadUi((prev) => ({ phase: "publish", value: 1, withCompression: prev?.withCompression ?? withCompression }));
+      } else {
+        // ↔ مسار الصور: الرئيسية أولًا (هى coverImage وواجهة الكارت وأول صورة فى عرض الريل)، وباقى الصور بترتيب اختيارها.
+        const main = photoItems.find((p) => p.url === mainPhotoUrl) ?? photoItems[0];
+        const ordered = [main, ...photoItems.filter((p) => p !== main)];
+        setPhaseProgress("upload", 0, false);
+        uploadedMedia = await uploadPhotos(user.id, ordered);
+        setUploadUi({ phase: "publish", value: 1, withCompression: false });
+      }
 
       let lat: number | undefined;
       let lng: number | undefined;
@@ -407,10 +519,17 @@ export default function CreateListingScreen() {
         }
       }
 
+      // ↔ الإعلان ممكن يتحط «قيد المراجعة» (الموافقة المسبقة من الأدمن مفعَّلة): نعرف ده من الصف اللى رجع من الخادم ونقول للمعلن.
+      let underReview = false;
       if (editingAd) {
-        await updateProperty.mutateAsync({ id: editingAd.id, patch: adFields });
+        const res = await updateProperty.mutateAsync({ id: editingAd.id, patch: { ...adFields, rightsDeclaredAt: new Date().toISOString() } });
+        underReview = res.moderationStatus === "pending" && editingAd.moderationStatus !== "pending";
       } else {
-        await createProperty.mutateAsync({ ...adFields, sellerId: user.id });
+        const created = await createProperty.mutateAsync({ ...adFields, sellerId: user.id, rightsDeclaredAt: new Date().toISOString() });
+        underReview = (created as { moderation_status?: string }).moderation_status === "pending";
+      }
+      if (underReview) {
+        showToast(t("تم استلام إعلانك وهو قيد المراجعة. سيظهر للجميع بعد موافقة الإدارة وسنُشعرك بالقرار."));
       }
 
       // حذف المسودة إن وجدت فور النجاح في النشر
@@ -421,6 +540,11 @@ export default function CreateListingScreen() {
       router.replace("/(tabs)/account?tab=ads");
     } catch (err) {
       console.warn("Publish listing failed:", err);
+      // ↔ انتهت نافذة الـ 24 ساعة من النشر: الخادم رفض التعديل (migration 20261021000000).
+      if (String((err as { message?: string })?.message ?? "").includes("edit_window_closed")) {
+        showToast(t("انتهت مدة التعديل (24 ساعة من نشر الإعلان)"));
+        return;
+      }
       // Alert.alert مبيظهرش على الويب — Toast بيشتغل على كل المنصات.
       showToast(`${t("تعذر نشر الإعلان")} — ${t("حاول مرة أخرى.")}`);
     } finally {
@@ -464,7 +588,7 @@ export default function CreateListingScreen() {
 
       <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
         <HelpBox title="🎥 وسائط الإعلان">
-          الفيديو مطلوب لعرض إعلانك في الريلز. يمكنك إضافة صورة واحدة لتكون الواجهة في صفحة البحث.
+          اختر أحد مسارين لعرض إعلانك في الريلز: تحميل فيديو (حتى ٥ دقائق، مع صورة غلاف اختيارية أو لقطة عشوائية منه)، أو تحميل حتى ١٥ صورة تُعرض تلقائيًا بشكل تتابعي مع صورة رئيسية تكون واجهة الكارت في صفحة المعلن والبحث وإدارة الحساب.
         </HelpBox>
 
         <FormLabel text="الغرض من الإعلان" required />
@@ -580,61 +704,157 @@ export default function CreateListingScreen() {
 
         <SocialShareSection selected={sharePlatforms} onToggle={toggleSharePlatform} />
 
-        <FormLabel text={t("فيديو العقار (مطلوب، حتى ٣ دقائق)")} required />
-        <View style={styles.mediaGrid}>
-          {videoItem ? (
-            <View style={styles.mediaCell}>
-              <View style={[StyleSheet.absoluteFill, styles.videoCell]}>
-                <Text style={styles.videoCellText}>🎬</Text>
-              </View>
-              <Pressable style={styles.mediaRemove} onPress={() => { setVideoItem(null); setVideoDurationMs(null); setVideoMeta(null); }}>
-                <Text style={styles.mediaRemoveText}>×</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <Pressable style={styles.mediaAdd} onPress={pickVideo}>
-              <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#22A652" strokeWidth={2}><Path d="M12 5v14M5 12h14" /></Svg>
-            </Pressable>
-          )}
-        </View>
-        <FormError text={t("يجب رفع فيديو للإعلان (بحد أقصى ٣ دقائق)")} show={errors.has("media")} />
+        <FormLabel text={t("وسائط الإعلان")} required />
+        <ChipRow
+          options={["video", "photos"] as const}
+          value={mediaMode}
+          onChange={(v) => { setMediaMode(v); setErrors((e) => { const n = new Set(e); n.delete("media"); return n; }); }}
+          labels={{ video: "🎬 فيديو", photos: "🖼️ صور (حتى ١٥)" }}
+        />
 
-        <FormLabel text="صورة الغلاف (اختياري)" />
-        <HelpBox title="صورة الغلاف (اختياري)">
-          لو ماخترتش صورة، هناخد لقطة عشوائية من الفيديو كغلاف للإعلان تلقائيًا.
-        </HelpBox>
-        <View style={styles.mediaGrid}>
-          {coverItem ? (
-            <View style={styles.mediaCell}>
-              <Image source={{ uri: coverItem.url }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
-              <Pressable style={styles.mediaRemove} onPress={() => setCoverItem(null)}>
-                <Text style={styles.mediaRemoveText}>×</Text>
-              </Pressable>
+        {mediaMode === "video" ? (
+          <>
+            <FormLabel text={t("فيديو العقار (مطلوب، حتى ٥ دقائق)")} required />
+            <View style={styles.mediaGrid}>
+              {videoItem ? (
+                <View style={styles.mediaCell}>
+                  <View style={[StyleSheet.absoluteFill, styles.videoCell]}>
+                    <Text style={styles.videoCellText}>🎬</Text>
+                  </View>
+                  <Pressable style={styles.mediaRemove} onPress={() => { setVideoItem(null); setVideoDurationMs(null); setVideoMeta(null); }}>
+                    <Text style={styles.mediaRemoveText}>×</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable style={styles.mediaAdd} onPress={pickVideo}>
+                  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#22A652" strokeWidth={2}><Path d="M12 5v14M5 12h14" /></Svg>
+                </Pressable>
+              )}
             </View>
-          ) : (
-            <Pressable style={styles.mediaAdd} onPress={pickCoverImage}>
-              <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#22A652" strokeWidth={2}><Path d="M12 5v14M5 12h14" /></Svg>
-            </Pressable>
-          )}
-        </View>
+            <FormError text={t("يجب رفع فيديو للإعلان (بحد أقصى ٥ دقائق)")} show={errors.has("media")} />
+
+            <FormLabel text="صورة الغلاف (اختياري)" />
+            <HelpBox title="صورة الغلاف (اختياري)">
+              لو ماخترتش صورة، هناخد لقطة عشوائية من الفيديو كغلاف للإعلان تلقائيًا.
+            </HelpBox>
+            <View style={styles.mediaGrid}>
+              {coverItem ? (
+                <View style={styles.mediaCell}>
+                  <Image source={{ uri: coverItem.url }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
+                  <Pressable style={styles.mediaRemove} onPress={() => setCoverItem(null)}>
+                    <Text style={styles.mediaRemoveText}>×</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable style={styles.mediaAdd} onPress={pickCoverImage}>
+                  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#22A652" strokeWidth={2}><Path d="M12 5v14M5 12h14" /></Svg>
+                </Pressable>
+              )}
+            </View>
+          </>
+        ) : (
+          <>
+            <FormLabel text={t("صور العقار (مطلوب، حتى ١٥ صورة)")} required />
+            <HelpBox title="الصورة الرئيسية">
+              اضغط ☆ على أي صورة لتكون الصورة الرئيسية: هي واجهة كارت الريل في صفحة المعلن والبحث وإدارة الحساب وأول صورة في العرض التلقائي. باقي الصور تُعرض بترتيب اختيارك.
+            </HelpBox>
+            <Text style={styles.photoCounter}>{photoItems.length} / {MAX_PHOTOS}</Text>
+            <View style={styles.mediaGrid}>
+              {photoItems.map((p) => {
+                const isMain = p.url === mainPhotoUrl;
+                return (
+                  <View key={p.url} style={[styles.mediaCell, isMain && styles.mediaCellMain]}>
+                    <Image source={{ uri: p.url }} style={StyleSheet.absoluteFill} contentFit="cover" transition={150} />
+                    <Pressable style={styles.mediaRemove} onPress={() => removePhoto(p.url)} hitSlop={6}>
+                      <Text style={styles.mediaRemoveText}>×</Text>
+                    </Pressable>
+                    <Pressable style={styles.mainStar} onPress={() => setMainPhotoUrl(p.url)} hitSlop={6} accessibilityLabel={t("اجعلها الصورة الرئيسية")}>
+                      <Text style={[styles.mainStarText, isMain && { color: "#FACC15" }]}>{isMain ? "★" : "☆"}</Text>
+                    </Pressable>
+                    {isMain && (
+                      <View style={styles.mainBadge}>
+                        <Text style={styles.mainBadgeText}>{t("الرئيسية")}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+              {photoItems.length < MAX_PHOTOS && (
+                <Pressable style={styles.mediaAdd} onPress={pickPhotos}>
+                  <Svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="#22A652" strokeWidth={2}><Path d="M12 5v14M5 12h14" /></Svg>
+                </Pressable>
+              )}
+            </View>
+            <FormError text={t("يجب إضافة صورة واحدة على الأقل (حتى ١٥ صورة)")} show={errors.has("media")} />
+          </>
+        )}
 
         <FormLabel text="موسيقى الإعلان" optional />
-        <View style={{ gap: 8 }}>
-          {MUSIC_OPTIONS.map((m) => (
-            <Pressable
-              key={m.key}
-              style={[styles.musicItem, music === m.key && styles.musicItemActive]}
-              onPress={() => setMusic(m.key)}
-            >
-              <Text style={styles.musicNote}>{m.note}</Text>
-              <Text style={styles.musicText}>{m.key} — {t(m.desc)}</Text>
+        <Pressable style={styles.musicHeader} onPress={toggleMusicOpen} accessibilityRole="button">
+          <Text style={styles.musicNote}>🎵</Text>
+          <Text style={styles.musicHeaderValue} numberOfLines={1}>{music ? music : t("بدون موسيقى")}</Text>
+          <Text style={styles.musicChevron}>{musicOpen ? "▴" : "▾"}</Text>
+        </Pressable>
+        {musicOpen && (
+          <View style={{ gap: 8, marginTop: 8 }}>
+            <HelpBox title="ضبط مدة الموسيقى">
+              تُضبط مدة الموسيقى تلقائيًا مع مدة الفيديو (أو عرض الصور): إن كانت أقصر تُعاد حتى تملأه بالكامل، وإن كانت أطول تُقطع عند نهايته. اضغط ▶ للاستماع قبل الاختيار.
+            </HelpBox>
+            <Pressable style={[styles.musicItem, music === "" && styles.musicItemActive]} onPress={() => setMusic("")}>
+              <Text style={styles.musicNote}>🔇</Text>
+              <Text style={styles.musicText}>{t("بدون موسيقى")}</Text>
             </Pressable>
-          ))}
-        </View>
+            {musicTracks.map((track) => {
+              const playing = previewingTitle === track.title;
+              return (
+                <Pressable
+                  key={track.id}
+                  style={[styles.musicItem, music === track.title && styles.musicItemActive]}
+                  onPress={() => setMusic(track.title)}
+                >
+                  <Pressable style={[styles.previewBtn, playing && styles.previewBtnOn]} onPress={() => togglePreview(track.title)} hitSlop={8} accessibilityLabel={playing ? t("إيقاف المعاينة") : t("استماع")}>
+                    <Text style={styles.previewBtnText}>{playing ? "⏸" : "▶"}</Text>
+                  </Pressable>
+                  <Text style={[styles.musicText, { flex: 1 }]} numberOfLines={2}>
+                    {track.title}{track.description ? ` — ${t(track.description)}` : ""}
+                    {track.durationSec ? `  (${Math.floor(track.durationSec / 60)}:${String(Math.round(track.durationSec % 60)).padStart(2, "0")})` : ""}
+                  </Text>
+                  {music === track.title && <Text style={styles.musicCheck}>✓</Text>}
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
 
         <FormLabel text="رقم التواصل (واتساب)" required />
         <PhoneInput value={phone} onChange={setPhone} error={errors.has("phone")} />
         <FormError text="من فضلك أدخل رقم صحيح" show={errors.has("phone")} />
+
+        {/* ↔ رسوم التطبيق + إقرار ملكية الحقوق (سياسة البيع والرسوم / حقوق النشر). */}
+        <View style={styles.legalBox}>
+          <Text style={styles.legalTitle}>{t("رسوم التطبيق")}</Text>
+          <Text style={styles.legalText}>
+            {t("نشر الإعلان مجاني. يُستحق رسم")} {dealSettings.feeEgp.toLocaleString("en-US")} {t("جنيه عند إتمام البيع أو التأجير فقط، ويتحمله البائع/المؤجّر أو الوسيط وحده، ولا يتحمل المشتري أو المستأجر أي رسم.")}
+          </Text>
+        </View>
+        {(
+          <>
+            <Pressable
+              style={styles.rightsRow}
+              onPress={() => { setRightsAccepted((v) => !v); setErrors((e) => { const n = new Set(e); n.delete("rights"); return n; }); }}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: rightsAccepted }}
+            >
+              <View style={[styles.rightsBox, rightsAccepted && styles.rightsBoxOn, errors.has("rights") && !rightsAccepted && styles.rightsBoxError]}>
+                {rightsAccepted && <Text style={styles.rightsMark}>✓</Text>}
+              </View>
+              <Text style={styles.rightsLabel}>
+                {t("أقرّ بأنني مالك حقوق هذه الصور والفيديو أو مرخَّص لي بها، وأنها لا تحوي موسيقى أو مقاطع مقتبسة من غيري، وأتحمل المسؤولية القانونية الكاملة عن ذلك.")}
+              </Text>
+            </Pressable>
+            <FormError text={t("يجب الإقرار بملكية الحقوق للمتابعة")} show={errors.has("rights")} />
+          </>
+        )}
       </ScrollView>
 
       {/* ↔ الشريط السفلي (نشر/مسودة) لازم يقف *فوق* شريط تنقّل النظام (أزرار أو
@@ -671,6 +891,15 @@ export default function CreateListingScreen() {
 
 function createStyles(themeColors: ThemeColors) {
   return StyleSheet.create({
+    legalBox: { backgroundColor: themeColors.surface, borderRadius: 12, padding: 12, marginTop: 18, gap: 4 },
+    legalTitle: { fontSize: 13, fontWeight: "900", color: themeColors.text },
+    legalText: { fontSize: 12, color: themeColors.textMuted, lineHeight: 19 },
+    rightsRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 14 },
+    rightsBox: { width: 24, height: 24, borderRadius: 7, borderWidth: 2, borderColor: themeColors.textSubtle, alignItems: "center", justifyContent: "center", backgroundColor: themeColors.surface },
+    rightsBoxOn: { backgroundColor: "#22A652", borderColor: "#22A652" },
+    rightsBoxError: { borderColor: "#DC2626" },
+    rightsMark: { color: "white", fontSize: 14, fontWeight: "900", lineHeight: 16 },
+    rightsLabel: { flex: 1, fontSize: 12.5, fontWeight: "600", color: themeColors.text, lineHeight: 20 },
     container: { flex: 1, backgroundColor: themeColors.background },
     header: { paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: 1, borderBottomColor: themeColors.border },
     closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: themeColors.surface, alignItems: "center", justifyContent: "center" },
@@ -688,6 +917,19 @@ function createStyles(themeColors: ThemeColors) {
     videoCellText: { fontSize: 22 },
     mediaRemove: { position: "absolute", top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
     mediaRemoveText: { color: "white", fontSize: 13, fontWeight: "900", marginTop: -1 },
+    musicHeader: { flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: themeColors.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14 },
+    musicHeaderValue: { flex: 1, fontSize: 13.5, fontWeight: "700", color: themeColors.text },
+    musicChevron: { color: themeColors.textSubtle, fontSize: 14 },
+    previewBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: themeColors.card, borderWidth: 1.5, borderColor: "#22A652", alignItems: "center", justifyContent: "center" },
+    previewBtnOn: { backgroundColor: "#22A652" },
+    previewBtnText: { fontSize: 13, color: "#22A652", fontWeight: "900" },
+    musicCheck: { color: "#22A652", fontSize: 16, fontWeight: "900" },
+    mediaCellMain: { borderWidth: 2, borderColor: "#22A652" },
+    mainStar: { position: "absolute", bottom: 3, left: 3, width: 24, height: 24, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
+    mainStarText: { color: "white", fontSize: 14, fontWeight: "900", marginTop: -1 },
+    mainBadge: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(34,166,82,0.92)", paddingVertical: 1, alignItems: "center" },
+    mainBadgeText: { color: "white", fontSize: 9.5, fontWeight: "900" },
+    photoCounter: { fontSize: 12, fontWeight: "800", color: themeColors.textSubtle, marginBottom: 6 },
     mediaAdd: { width: 84, height: 84, borderRadius: 10, borderWidth: 1.5, borderColor: "#22A652", borderStyle: "dashed", alignItems: "center", justifyContent: "center" },
     musicItem: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: themeColors.surface, borderRadius: 10, padding: 12, borderWidth: 1, borderColor: themeColors.border },
     musicItemActive: { borderColor: "#22A652", backgroundColor: themeColors.isDark ? "rgba(34,166,82,0.18)" : "#ECFDF5" },

@@ -1,10 +1,11 @@
 export type NotifCategory = "like" | "save" | "follow" | "chat" | "alert";
 
 export type NotifAction =
-  | { type: "reel"; sellerId: string; propertyId: string }
+  | { type: "reel"; sellerId: string; propertyId: string; comments?: boolean }
   | { type: "seller"; id: string }
   | { type: "chat"; id: string }
-  | { type: "property"; id: string };
+  | { type: "property"; id: string }
+  | { type: "offers" };
 
 export type NotifItem = {
   id?: string; // real notifications carry their DB id; mock entries below don't need one
@@ -14,6 +15,9 @@ export type NotifItem = {
   time: string;
   action?: NotifAction;
   read: boolean;
+  // ↔ للقائمة الموحّدة (التجميع بالتاريخ والترتيب من الأحدث): وقت الإشعار الفعلى + فئته. إشعارات mock مفيهاش.
+  createdAt?: string;
+  category?: NotifCategory;
 };
 
 // ↔ NOTIF_DATA in app-viewer.html (all start unread, same as the

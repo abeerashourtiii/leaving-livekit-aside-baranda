@@ -60,19 +60,19 @@
       <true/>
     </dict>
     <key>NSCameraUsageDescription</key>
-    <string>يحتاج ديارينو للوصول إلى الكاميرا لبدء بث مباشر لعقارك.</string>
+    <string>يحتاج باراندا للوصول إلى الكاميرا لبدء بث مباشر لعقارك.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your location</string>
     <key>NSLocationAlwaysUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your location</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>يحتاج ديارينو للوصول لموقعك لعرض العقارات القريبة منك ضمن نطاق تختاره.</string>
+    <string>يحتاج باراندا للوصول لموقعك لعرض العقارات القريبة منك ضمن نطاق تختاره.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>يحتاج ديارينو للوصول إلى الميكروفون أثناء البث المباشر.</string>
+    <string>يحتاج باراندا للوصول إلى الميكروفون أثناء البث المباشر.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
-    <string>يحتاج ديارينو إلى حفظ الصور والتسجيلات في البوم الصور.</string>
+    <string>يحتاج باراندا إلى حفظ الصور والتسجيلات في البوم الصور.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>يحتاج ديارينو للوصول إلى الصور لإرفاقها في المحادثات وعند نشر إعلانك.</string>
+    <string>يحتاج باراندا للوصول إلى الصور لإرفاقها في المحادثات وعند نشر إعلانك.</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

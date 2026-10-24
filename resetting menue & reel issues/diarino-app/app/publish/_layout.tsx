@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { View, ActivityIndicator } from "react-native";
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
-import { redirectGuestToLogin } from "../../lib/guestGate";
+import { promptGuestLogin } from "../../lib/guestGate";
 import { useThemeColors } from "../../lib/hooks/useThemeColors";
 
 // ↔ النشر والطلب لأصحاب الحسابات المسجَّلة فقط (جوجل أو بريد). الضيف (جلسة
@@ -11,11 +11,22 @@ import { useThemeColors } from "../../lib/hooks/useThemeColors";
 export default function PublishLayout() {
   const { user, loading } = useCurrentUser();
   const themeColors = useThemeColors();
-  const blocked = !loading && (!user || !!user.is_anonymous);
+  const isGuest = !loading && !!user?.is_anonymous;
+  const noSession = !loading && !user;
+  const blocked = isGuest || noSession;
 
+  // ↔ ضيف وصل هنا من مدخل غير كروت القائمة (رابط مباشر، مسودة...): نرجّعه للى كان فيه ونعرض نافذة
+  // «تسجيل الدخول / ليس الآن» — بدون signOut ولا مسح بيانات التطبيق. من غير جلسة أصلًا (انتهت)
+  // فمفيش حاجة نحافظ عليها: صفحة الدخول مباشرة.
   useEffect(() => {
-    if (blocked) void redirectGuestToLogin();
-  }, [blocked]);
+    if (isGuest) {
+      promptGuestLogin();
+      if (router.canGoBack()) router.back();
+      else router.replace("/(tabs)");
+    } else if (noSession) {
+      router.replace("/");
+    }
+  }, [isGuest, noSession]);
 
   if (loading || blocked) {
     return (

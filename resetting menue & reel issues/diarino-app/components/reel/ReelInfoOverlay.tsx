@@ -61,8 +61,8 @@ export function ReelInfoOverlay({
         delayLongPress={500}
       >
         <View style={styles.row}>
-          <View style={[styles.purposeTag, { backgroundColor: p.purpose === "sale" ? "#22A652" : "#F4673F" }]}>
-            <Text style={styles.purposeTagText}>{p.purpose === "sale" ? t("للبيع") : t("للإيجار")}</Text>
+          <View style={[styles.purposeTag, { backgroundColor: p.closedType ? "#B91C1C" : p.purpose === "sale" ? "#22A652" : "#F4673F" }]}>
+            <Text style={styles.purposeTagText}>{p.closedType ? (p.closedType === "rented" ? t("تم الإيجار") : t("تم البيع")) : p.purpose === "sale" ? t("للبيع") : t("للإيجار")}</Text>
           </View>
           <Pressable style={styles.descBtn} onPress={onOpenDetails} hitSlop={6}>
             <Svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2}>

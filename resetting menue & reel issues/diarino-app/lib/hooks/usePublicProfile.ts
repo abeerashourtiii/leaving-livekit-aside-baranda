@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "../supabase";
+import { AccountType, isAccountType } from "../accountTypes";
 
 // ↔ بيانات البروفايل العامة لأى مستخدم من profiles_public (الفيو الآمن: بدون
 // هاتف ولا bio) — بتخلّى صفحة المعلن (app/seller/[id].tsx) تفتح حتى لو
@@ -14,6 +15,7 @@ export type PublicProfile = {
   verified: boolean;
   isPublic: boolean;
   bio: string | null;
+  accountType: AccountType | null;
 };
 
 type PublicProfileRow = {
@@ -23,6 +25,7 @@ type PublicProfileRow = {
   verified: boolean | null;
   is_public: boolean | null;
   bio?: string | null;
+  account_type?: string | null;
 };
 
 export function usePublicProfile(id: string | undefined, enabled = true) {
@@ -33,17 +36,16 @@ export function usePublicProfile(id: string | undefined, enabled = true) {
     queryFn: async (): Promise<PublicProfile | null> => {
       // ↔ النبذة (bio) بتتقرأ من الفيو بعد migration 20261007000002. لو لسه ما اتطبّقتش
       // (العمود مش موجود) نرجع للاستعلام القديم بدونها بدل ما الصفحة كلها تفشل.
-      let res = await supabase
-        .from("profiles_public")
-        .select("id, full_name, avatar_url, verified, is_public, bio")
-        .eq("id", id!)
-        .maybeSingle();
-      if (res.error) {
-        res = (await supabase
-          .from("profiles_public")
-          .select("id, full_name, avatar_url, verified, is_public")
-          .eq("id", id!)
-          .maybeSingle()) as typeof res;
+      // ↔ بنجرّب الأعمدة الأحدث الأول (account_type بعد migration 20261009000000، ثم bio بعد 20261007000002)
+      // ونرجع للأقدم لو العمود لسه مش موجود، بدل ما الصفحة كلها تفشل.
+      const attempts = [
+        "id, full_name, avatar_url, verified, is_public, bio, account_type",
+        "id, full_name, avatar_url, verified, is_public, bio",
+        "id, full_name, avatar_url, verified, is_public",
+      ];
+      let res = await supabase.from("profiles_public").select(attempts[0]).eq("id", id!).maybeSingle();
+      for (let i = 1; res.error && i < attempts.length; i++) {
+        res = (await supabase.from("profiles_public").select(attempts[i]).eq("id", id!).maybeSingle()) as typeof res;
       }
       if (res.error) throw res.error;
       if (!res.data) return null;
@@ -55,6 +57,7 @@ export function usePublicProfile(id: string | undefined, enabled = true) {
         verified: row.verified ?? false,
         isPublic: row.is_public ?? true,
         bio: row.bio ?? null,
+        accountType: isAccountType(row.account_type) ? row.account_type : null,
       };
     },
     enabled: validId && enabled,

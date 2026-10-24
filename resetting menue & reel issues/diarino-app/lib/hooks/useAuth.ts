@@ -7,6 +7,7 @@ import { queryClient } from "../queryClient";
 import { resetAdminDB } from "./useAdminDB";
 import { clearCompareSelection } from "./useCompareSelection";
 import { getAuthSnapshot } from "./useCurrentUser";
+import { retryWithTimeout, sleep } from "../async";
 
 const SKIP_KEY = "diarino:skip_auth";
 
@@ -39,6 +40,23 @@ export function translateOAuthError(raw: string): string {
   return raw || "تعذر تسجيل الدخول. حاول مرة أخرى.";
 }
 
+// ↔ رابط استعادة كلمة المرور (type=recovery فى رابط الإيميل): بعد ما الجلسة تتكوّن من الرابط بنعلّم إن المستخدم
+// جاى من «نسيت كلمة المرور»، وشاشة auth-callback بتحوّله لصفحة تعيين كلمة مرور جديدة (app/reset-password.tsx).
+let recoveryPending = false;
+export function consumeRecoveryPending(): boolean {
+  const v = recoveryPending;
+  recoveryPending = false;
+  return v;
+}
+// ↔ بتستنى أى رابط auth لسه بيتكمّل (مثلًا رابط وصل والتطبيق شغّال فى الخلفية) قبل ما auth-callback تقرر وجهتها.
+export async function awaitPendingAuthCallback(): Promise<void> {
+  try {
+    await callbackSessionPromise;
+  } catch {
+    /* الخطأ بيتعالج عند مصدره */
+  }
+}
+
 export async function completeOAuthCallback(rawUrl: string): Promise<{ error: string | null }> {
   console.log("[Auth] Processing OAuth callback.");
   if (callbackUrl === rawUrl && callbackSessionPromise) return callbackSessionPromise;
@@ -65,6 +83,7 @@ async function completeOAuthCallbackOnce(rawUrl: string): Promise<{ error: strin
         return { error: translateOAuthError(error.message) };
       }
       console.log("[Auth] Session set successfully via tokens.");
+      if ((hashParams.get("type") || url.searchParams.get("type")) === "recovery") recoveryPending = true;
       return { error: null };
     }
 
@@ -117,7 +136,8 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
           skipBrowserRedirect: false,
           queryParams: {
             access_type: "offline",
-            prompt: "consent",
+            // ↔ select_account: يظهر اختيار الحساب دائمًا فيسهل تبديل حساب جوجل (بدل ما يدخل تلقائيًا بآخر حساب).
+            prompt: "select_account consent",
           },
         },
       });
@@ -142,7 +162,7 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
         skipBrowserRedirect: true,
         queryParams: {
           access_type: "offline",
-          prompt: "consent",
+          prompt: "select_account consent",
         },
       },
     });
@@ -163,14 +183,25 @@ export async function signInWithGoogle(): Promise<{ error: string | null }> {
 
     if (result.type === "success" && result.url) {
       finalUrl = result.url;
-    } else if (result.type === "cancel") {
-      console.log("[Auth Native] User cancelled or browser closed.");
-      return { error: null };
     } else {
-      // الاستفادة من Deep Link المباشر في حال إغلاق المتصفح أو تأخر الاستجابة
-      const initialUrl = await Linking.getInitialURL();
-      if (initialUrl && initialUrl.includes("auth-callback")) {
-        finalUrl = initialUrl;
+      // ↔ إصلاح «تعليق الدخول»: على أندرويد غالبًا يرجع المتصفح بـ cancel/dismiss بينما رابط الرجوع (deep link) وصل فعلًا للتطبيق
+      // وبيتكمّل فى app/_layout.tsx. قبل كده كنا إمّا نرجع «بدون خطأ» ونسيب المستخدم على شاشة الدخول، أو نعرض خطأ مع إن الدخول نجح.
+      // دلوقتي نستنى الإكمال الجارى (حتى 5 ثوانٍ) ونتأكد من وجود جلسة فعلًا قبل ما نقرر.
+      if (result.type !== "cancel") {
+        const initialUrl = await Linking.getInitialURL();
+        if (initialUrl && initialUrl.includes("auth-callback")) finalUrl = initialUrl;
+      }
+      if (!finalUrl) {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          await awaitPendingAuthCallback();
+          if (getAuthSnapshot().user) return { error: null };
+          await sleep(250);
+        }
+        if (result.type === "cancel" || result.type === "dismiss") {
+          console.log("[Auth Native] User cancelled or browser closed.");
+          return { error: null };
+        }
       }
     }
 
@@ -217,6 +248,12 @@ export function translateEmailAuthError(raw: string): string {
     return "تم إرسال عدد كبير من رسائل التفعيل. انتظر قليلًا ثم أعد المحاولة.";
   if (m.includes("already registered") || m.includes("already exists") || m.includes("user already registered"))
     return "هذا البريد الإلكتروني مسجّل بالفعل. جرّب تسجيل الدخول بدلاً من ذلك.";
+  if (m.includes("same_password") || m.includes("different from the old") || m.includes("same as the old"))
+    return "كلمة المرور الجديدة يجب أن تختلف عن كلمة المرور الحالية.";
+  if (m.includes("auth session missing") || m.includes("session_not_found") || m.includes("not authenticated") || m.includes("jwt expired"))
+    return "انتهت صلاحية رابط الاستعادة. اطلب رابطًا جديدًا من «نسيت كلمة المرور».";
+  if (m.includes("for security purposes") || m.includes("only request this after"))
+    return "من أجل الأمان، انتظر دقيقة ثم اطلب رابطًا جديدًا.";
   if (m.includes("invalid login credentials") || m.includes("invalid_credentials"))
     return "البريد الإلكتروني أو كلمة المرور غير صحيحة.";
   if (m.includes("email not confirmed") || m.includes("not confirmed"))
@@ -246,14 +283,17 @@ export function getEmailConfirmRedirectUri(): string {
   return Linking.createURL("auth-callback");
 }
 
+// ↔ extraProfile: باقى بيانات الحساب (الاسم الأول/الثانى، تاريخ الميلاد، الجنس، الجنسية، الإقامة، الهاتف، نوع الحساب،
+// إصدار السياسات الموافَق عليها) بتتبعت فى user_metadata، والـ trigger handle_new_user
+// (migration 20261010000000) بينقلها لصف profiles — لأن مفيش جلسة لحد ما البريد يتفعّل فمينفعش نكتب فى profiles من هنا.
 export async function signUpWithEmail(
-  email: string, password: string, fullName: string
+  email: string, password: string, fullName: string, extraProfile: Record<string, string> = {}
 ): Promise<{ error: string | null; needsEmailConfirmation: boolean; alreadyRegistered?: boolean }> {
   console.log("[Auth] Starting Email Sign-Up...");
   const { data, error } = await supabase.auth.signUp({
     email: email.trim(),
     password,
-    options: { data: { full_name: fullName.trim() }, emailRedirectTo: getEmailConfirmRedirectUri() },
+    options: { data: { ...extraProfile, full_name: fullName.trim() }, emailRedirectTo: getEmailConfirmRedirectUri() },
   });
 
   if (error) {
@@ -310,16 +350,52 @@ export async function resendSignupConfirmation(email: string): Promise<{ error: 
   return { error: null };
 }
 
+// ↔ نسيت كلمة المرور: Supabase بيبعت رسالة للبريد المسجّل فيها رابط، والرابط بيرجّع للتطبيق على نفس عنوان تفعيل البريد
+// (diarino://auth-callback على الموبايل/APK، <origin>/auth-callback على الويب — موجودين أصلًا فى Redirect URLs).
+// الرسالة بتتبعت حتى لو البريد مش مسجّل من غير ما نكشف ده (حماية من تخمين الحسابات). قالب الرسالة: Email Templates ←
+// Reset password (راجع docs/email-signup-setup.md).
+export async function requestPasswordReset(email: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: getEmailConfirmRedirectUri() });
+  if (error) {
+    console.error("[Auth] Password reset request error:", error.message);
+    return { error: translateEmailAuthError(error.message) };
+  }
+  return { error: null };
+}
+
+// ↔ تعيين كلمة مرور جديدة (بجلسة الاستعادة اللى اتكوّنت من رابط الإيميل).
+export async function updatePassword(newPassword: string): Promise<{ error: string | null }> {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) {
+    console.error("[Auth] Update password error:", error.message);
+    return { error: translateEmailAuthError(error.message) };
+  }
+  return { error: null };
+}
+
 // ↔ بعد أي نوع تسجيل دخول ناجح (جوجل / إيميل)، نفس منطق التوجيه المستخدم
 // فى app/index.tsx: أدمن يروح للوحة التحكم، غيره يروح للتطبيق العادي.
+// ↔ هل المستخدم أدمن؟ بمهلة وإعادة محاولة (مرتين × 6 ثوانٍ) — قبل كده الاستعلام كان بلا مهلة، وأى تأخير/تعليق فيه كان بيسيب
+// المستخدم على شاشة فاضية بعد تسجيل الدخول. لو فشل نرجع false (يدخل التطبيق العادى) بدل ما يتعلّق.
+export async function lookupIsAdmin(userId: string): Promise<boolean> {
+  try {
+    const { data, error } = await retryWithTimeout(
+      () => supabase.from("user_roles").select("role").eq("user_id", userId).eq("role", "admin").maybeSingle(),
+      { attempts: 2, timeoutMs: 6000, label: "user_roles" },
+    );
+    if (error) {
+      console.warn("[Auth] admin role lookup failed:", error.message);
+      return false;
+    }
+    return data?.role === "admin";
+  } catch (err) {
+    console.warn("[Auth] admin role lookup timed out/failed:", err);
+    return false;
+  }
+}
+
 export async function resolvePostAuthRoute(userId: string): Promise<"/admin" | "/(tabs)"> {
-  const { data: role } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId)
-    .eq("role", "admin")
-    .maybeSingle();
-  return role?.role === "admin" ? "/admin" : "/(tabs)";
+  return (await lookupIsAdmin(userId)) ? "/admin" : "/(tabs)";
 }
 
 export async function signInAsGuest(): Promise<{ error: string | null }> {

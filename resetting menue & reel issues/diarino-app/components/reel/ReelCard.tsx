@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, memo } from "react";
+import { useCallback, useEffect, useRef, useState, memo, useMemo } from "react";
 import { View, Text, Pressable, StyleSheet, Animated, Easing, ScrollView, BackHandler, PanResponder, PanResponderGestureState } from "react-native";
 import { Image } from "expo-image";
+import type { ImageLoadEventData } from "expo-image";
 import Svg, { Path } from "react-native-svg";
 import { Property, getReelMode } from "../../lib/types";
 import { ReelBackground } from "./ReelBackground";
@@ -8,16 +9,27 @@ import { ReelInfoOverlay } from "./ReelInfoOverlay";
 import { ReelActionRail } from "./ReelActionRail";
 import { ReelSeekBar } from "./ReelSeekBar";
 import { ReelVideoPlayer, ReelVideoPlayerHandle } from "./ReelVideoPlayer";
-import { startReelMusic, stopReelMusic, setReelMusicMuted } from "../../lib/musicPlayer";
+import { startReelMusic, stopReelMusic, setReelMusicMuted, restartReelMusic, seekReelMusic } from "../../lib/musicPlayer";
+import { useMusicLibrary } from "../../lib/musicLibrary";
 import { cldOptimized, cldReelPoster } from "../../lib/cloudinary";
 import { PropertyDetailsContent } from "../property/PropertyDetailsContent";
 import { PropertyCtaBar } from "../property/PropertyCtaBar";
 import { ReelCaptionsOverlay } from "./ReelCaptionsOverlay";
+import { ReelCommentsPanel } from "./ReelCommentsPanel";
+import { useKeyboardState } from "../../lib/hooks/useKeyboardState";
+import { setReelSheetLocked } from "../../lib/reelSheetLock";
 import { useReelHeight, useReelControlsBottomOffset } from "../../lib/uiConstants";
 import { useReelPreferences } from "../../lib/hooks/useReelPreferences";
 import { useThemeColors } from "../../lib/hooks/useThemeColors";
+import { usePublicProfile } from "../../lib/hooks/usePublicProfile";
 import { physicalSide } from "../../lib/rtl";
 
+// ↔ نسبة عرض/ارتفاع كل فيديو (تُقرأ من صورة البوستر عند أول تحميل) — بتتخزّن هنا عشان رجوعك لنفس الريل
+// أو إعادة بناء الكارت ما تعيدش حساب الوضع (من غير قفزة فى الشكل).
+const VIDEO_ASPECT_CACHE = new Map<string, number>();
+
+// ↔ مستوى صوت موسيقى الإعلان لما بتصاحب فيديو (عشان صوت الفيديو الأصلى يفضل مسموع).
+const VIDEO_MUSIC_VOLUME = 0.35;
 const BASE_SLIDE_MS = 4000; // ↔ currentReelSpeed default in app-viewer.html
 // ↔ زرار إغلاق لوحة التفاصيل مثبَّت فعليًا فى أعلى يسار الشاشة (بطلب
 // صريح)، بغض النظر عن لغة الواجهة — نفس أسلوب physicalSide()/
@@ -30,6 +42,8 @@ const LONG_PRESS_MS = 500; // ↔ setTimeout(..., 500) in startLongPress()
 // ↔ #1/#3: ارتفاع الريل بعد ما يتصغّر لفوق وقت فتح لوحة التفاصيل — نفس
 // فكرة الـ mini-player بتاع الـ Shorts فى يوتيوب لما تفتح الكومنتات.
 const MINI_MEDIA_HEIGHT = 220;
+// ↔ لما لوحة المفاتيح تفتح (كتابة تعليق) الريل المصغّر بيصغر أكتر عشان تفضل مساحة تكفى للتعليقات فوق الكيبورد.
+const COMPACT_MEDIA_HEIGHT = 120;
 const SHEET_ANIM_MS = 280;
 
 type Props = {
@@ -72,13 +86,15 @@ type Props = {
   // مفعّل — الشاشة الأب (app/(tabs)/index.tsx) هي اللي بتقرر تتنقل لأي
   // ريل (السحب للريل اللي بعده)، نفس فكرة onOpenDetails/onOpenSeller.
   onFinished?: () => void;
+  // ↔ فتح لوحة التعليقات مباشرة عند أول عرض (من إشعار تعليق/رد: ?comments=1).
+  initialCommentsOpen?: boolean;
 };
 
 export const ReelCard = memo(function ReelCard({
   property, index, isActive, isNearActive, isFollowing, isFavorite, isLiked, isComparing,
   detailsOpen, onCloseDetails,
   onOpenDetails, onOpenSeller, onToggleFollow, onToggleFavorite, onToggleLike, onShare, onToggleCompare, onReport,
-  onFinished,
+  onFinished, initialCommentsOpen = false,
 }: Props) {
   const reelHeight = useReelHeight();
   // ↔ #1/#2: الكارت بقى fullscreen كامل (useReelHeight بترجع ارتفاع الشاشة
@@ -123,6 +139,46 @@ export const ReelCard = memo(function ReelCard({
   // بيظهر فورًا بدل شاشة سودا. لو الكارت خرج من النطاق القريب (الـ player
   // اتشال) البوستر بيرجع تاني عشان الدورة الجاية.
   const [videoStarted, setVideoStarted] = useState(false);
+
+  // ↔ الفيديو الطولى (portrait) كان بيتعرض متوسَّط (contain) فى ارتفاع الشاشة كلها، فيطلع شريط أسود فاضى
+  // فوقه (تحت الأزرار العلوية) وتحته. الآن بنثبّته من أعلى الشاشة بنسبته الأصلية بالظبط (من غير قص ولا
+  // ضغط): الأزرار العلوية (إشعارات/فلتر/✕) عائمة فوق الريل نفسه، والمساحة الفاضية (لو فى) بتروح لأسفل
+  // ورا شريط الـ seek وشريط المهام. النسبة بنحسبها من صورة بوستر الفيديو (نفس نسبة الفيديو).
+  // ↔ صورة/اسم البائع على أيقونة البروفايل (+ متابعة): من نفس مصدر صفحة المعلن (profiles_public عبر
+  // usePublicProfile) بدل النسخة المضمّنة جوه بيانات العقار، اللى كانت بتفضل قديمة/فاضية وبتظهر الحرف الأول بس
+  // (مثلًا بعد رفع الصورة من «إدارة الحساب»). الكاش بيتحدّث لحظيًا بعد حفظ البروفايل (useProfile → publicProfile).
+  const { data: sellerProfile } = usePublicProfile(property.seller.id, isNearActive);
+  const seller = useMemo(() => {
+    if (!sellerProfile) return property.seller;
+    const name = sellerProfile.name || property.seller.name;
+    return {
+      ...property.seller,
+      name,
+      initial: name.charAt(0) || property.seller.initial,
+      verified: sellerProfile.verified,
+      avatarUrl: sellerProfile.avatarUrl ?? property.seller.avatarUrl ?? null,
+    };
+  }, [sellerProfile, property.seller]);
+
+  const [cardW, setCardW] = useState(0);
+  const [videoAspect, setVideoAspect] = useState<number | null>(() => (video ? VIDEO_ASPECT_CACHE.get(video.url) ?? null : null));
+  const [aspectTimedOut, setAspectTimedOut] = useState(false);
+  useEffect(() => {
+    if (!video || videoAspect != null) return;
+    // ↔ إصلاح «تأخير ظهور الريل أثناء التصفح»: صندوق الفيديو كان مخفى (opacity 0) لحد ما بوستر الريل يتحمّل ليعرف نسبة الأبعاد،
+    // وتوليد البوستر من Cloudinary ممكن ياخد ثانية أو أكتر — فكانت الشاشة تفضل سودا حتى لو الفيديو جاهز. دلوقتي ننتظر 250ms فقط
+    // (والفيديو نفسه بيظهر فورًا أول ما يبدأ التشغيل)، ونعرض الريل بالنسبة الافتراضية لحد ما النسبة الحقيقية توصل.
+    const timeout = setTimeout(() => setAspectTimedOut(true), 250);
+    return () => clearTimeout(timeout);
+  }, [video, videoAspect]);
+  const handlePosterLoad = (e: ImageLoadEventData) => {
+    const w = e?.source?.width;
+    const h = e?.source?.height;
+    if (!video || !w || !h) return;
+    const aspect = w / h;
+    VIDEO_ASPECT_CACHE.set(video.url, aspect);
+    setVideoAspect(aspect);
+  };
   useEffect(() => {
     if (!isNearActive) setVideoStarted(false);
   }, [isNearActive]);
@@ -134,7 +190,13 @@ export const ReelCard = memo(function ReelCard({
   // finishedRef/إعادة الموضع لصفر بعد didJustFinish بقت جوه
   // ReelVideoPlayer.tsx نفسه (نفس المنطق، مكانه اتغيّر بس).
 
+  // ↔ موضع الفيديو الحالى (ثوانى) + آخر موضع — لمزامنة الموسيقى: لما الفيديو يلف من الأول (loop) الموسيقى ترجع
+  // لأولها (فمدتها بتتضبط على مدة الفيديو: تتكرر لو أقصر وتتقطع لو أطول).
+  const videoSecRef = useRef(0);
+  const slideSecRef = useRef(0);
   function onVideoPosition(currentSec: number, durationSec: number) {
+    if (currentSec < videoSecRef.current - 1) restartReelMusic();
+    videoSecRef.current = currentSec;
     setVideoPosMs(currentSec * 1000);
     setVideoDurMs(durationSec * 1000);
   }
@@ -146,6 +208,7 @@ export const ReelCard = memo(function ReelCard({
   function seekVideo(pct: number) {
     // ↔ نضبط الموضع ونشغّل فورًا من نقطة الإفلات، وبعدها نشيل حالة الإيقاف.
     videoRef.current?.seekToPct(pct);
+    seekReelMusic(pct * (videoDurMs / 1000));
     setPaused(false);
     setScrubbing(false);
   }
@@ -155,6 +218,7 @@ export const ReelCard = memo(function ReelCard({
   const [slideIdx, setSlideIdx] = useState(0);
   const [slideElapsedMs, setSlideElapsedMs] = useState(0);
   const slideTotalMs = images.length * BASE_SLIDE_MS;
+  slideSecRef.current = slideElapsedMs / 1000;
 
   useEffect(() => {
     if (mode !== "slideshow" || images.length < 2 || !isActive || holdPaused) return;
@@ -167,6 +231,7 @@ export const ReelCard = memo(function ReelCard({
         // يوصل لآخر الدورة — لو next أصغر من prev كده يبقى فعلاً لف
         // (خلّص دورة كاملة)، فده اللحظة المناسبة لتفعيل onFinished لو
         // autoAdvance شغال.
+        if (next < prev) restartReelMusic();
         if (next < prev && autoAdvance) onFinished?.();
         setSlideIdx(Math.floor(next / interval) % images.length);
         return next;
@@ -175,10 +240,24 @@ export const ReelCard = memo(function ReelCard({
     return () => clearInterval(id);
   }, [mode, images.length, isActive, holdPaused, speed, autoAdvance, onFinished]);
 
+  // ↔ تحميل مسبق لكل صور العرض التتابعى (حتى ١٥) أول ما الريل يقرب يبقى نشط، عشان التنقل بين الصور من غير وميض/تأخير.
+  const imagesKey = images.map((m) => m.url).join("|");
+  useEffect(() => {
+    if (mode !== "slideshow" || images.length < 2 || !isNearActive) return;
+    try {
+      const r = Image.prefetch(images.map((m) => cldOptimized(m.url))) as Promise<boolean> | undefined;
+      r?.catch?.(() => {});
+    } catch {
+      /* best-effort */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, imagesKey, isNearActive]);
+
   function seekSlideshow(pct: number) {
     const total = BASE_SLIDE_MS * images.length;
     const elapsed = pct * total;
     setSlideElapsedMs(elapsed);
+    seekReelMusic(elapsed / 1000);
     setSlideIdx(Math.min(images.length - 1, Math.floor(elapsed / BASE_SLIDE_MS)));
     setPaused(false);
     setScrubbing(false);
@@ -188,10 +267,18 @@ export const ReelCard = memo(function ReelCard({
   // 'none' or 'slideshow') and the property has a `music` track set, and
   // stops the moment this reel isn't the active/playing one, same as the
   // pause-tied start/stop in the original's toggleReelPause().
+  // ↔ موسيقى الإعلان بتشتغل مع الفيديو كمان (بصوت أخفض من صوته) وتتزامن معه، ومع العرض التتابعى للصور. المكتبة
+  // (Cloudinary) لازم تكون اتحمّلت قبل البدء عشان المقطع المختار يتحل صح (ما نبدأش بمقطع افتراضى بالغلط).
+  const { tracks: musicTracks, isLoading: musicLibLoading } = useMusicLibrary();
+  const musicLibKey = musicTracks.map((tr) => `${tr.title}|${tr.url ?? ""}`).join(",");
   useEffect(() => {
-    const shouldPlay = mode !== "video" && !!property.music && isActive && !holdPaused;
+    const ready = (mode !== "video" || videoStarted) && !musicLibLoading;
+    const shouldPlay = !!property.music && ready && isActive && !holdPaused;
     if (shouldPlay) {
-      startReelMusic(property.id, property.music);
+      startReelMusic(property.id, property.music, {
+        volume: mode === "video" ? VIDEO_MUSIC_VOLUME : 1,
+        positionSec: mode === "video" ? videoSecRef.current : slideSecRef.current,
+      });
       // ↔ #4 (كتم صوت الخلفية): بيحدّث مستوى صوت الموسيقى الشغالة فورًا
       // مع أي تغيير فى musicMuted، من غير ما يوقف ويشغّل الموسيقى تانى.
       setReelMusicMuted(musicMuted);
@@ -201,7 +288,7 @@ export const ReelCard = memo(function ReelCard({
     return () => {
       stopReelMusic();
     };
-  }, [mode, property.music, property.id, isActive, holdPaused, musicMuted]);
+  }, [mode, property.music, property.id, isActive, holdPaused, musicMuted, videoStarted, musicLibLoading, musicLibKey]);
 
   function togglePause() {
     setPaused((prev) => {
@@ -224,11 +311,50 @@ export const ReelCard = memo(function ReelCard({
   // مفتوحة) عشان اللوحة تتحرك للأسفل وتختفي بالتدريج بدل ما تختفي فجأة،
   // وبعدين يتشال المكوّن فعليًا لما الأنيميشن يخلص (مفيش استعلامات شغالة
   // فى الخلفية من غير داعٍ وهي مقفولة).
+  // ↔ التعليقات (طلب المستخدم): نفس اللوحة السفلية بتتفتح بمحتوى التعليقات بدل التفاصيل — الريل بيتصغّر فوق وبيفضل شغّال.
+  // detailsMounted/sheetAnim بقوا يخدموا اللوحتين (تفاصيل أو تعليقات)؛ sheetKind بيحدد المحتوى المعروض (ويفضل ثابت أثناء أنيميشن الإغلاق).
+  const [commentsOpen, setCommentsOpen] = useState(initialCommentsOpen);
+  const [sheetKind, setSheetKind] = useState<"details" | "comments">(initialCommentsOpen ? "comments" : "details");
+  const panelOpen = detailsOpen || commentsOpen;
+  const kb = useKeyboardState();
   const [detailsMounted, setDetailsMounted] = useState(false);
   const sheetAnim = useRef(new Animated.Value(0)).current;
 
+  // فتح التفاصيل بيقفل التعليقات (لوحة واحدة فى المرة).
   useEffect(() => {
     if (detailsOpen) {
+      setSheetKind("details");
+      setCommentsOpen(false);
+    }
+  }, [detailsOpen]);
+
+  // الكارت اللى مبقاش نشط بيقفل تعليقاته؛ والتعليقات المفتوحة بتقفل سحب قائمة الريلز الرأسية.
+  useEffect(() => {
+    if (!isActive && commentsOpen) setCommentsOpen(false);
+  }, [isActive, commentsOpen]);
+  useEffect(() => {
+    if (!commentsOpen || !isActive) return;
+    setReelSheetLocked(true);
+    return () => setReelSheetLocked(false);
+  }, [commentsOpen, isActive]);
+
+  const contentScrollY = useRef(0);
+  const openComments = useCallback(() => {
+    if (detailsOpen) onCloseDetails();
+    contentScrollY.current = 0;
+    setSheetKind("comments");
+    setCommentsOpen(true);
+  }, [detailsOpen, onCloseDetails]);
+  const closeSheet = useCallback(() => {
+    if (commentsOpen) setCommentsOpen(false);
+    else onCloseDetails();
+  }, [commentsOpen, onCloseDetails]);
+  // ↔ الـ PanResponder (تحت) بيتبني مرة واحدة، فبيقرا أحدث closeSheet/sheetHeight من refs.
+  const closeSheetRef = useRef(closeSheet);
+  closeSheetRef.current = closeSheet;
+
+  useEffect(() => {
+    if (panelOpen) {
       setDetailsMounted(true);
       Animated.timing(sheetAnim, {
         toValue: 1, duration: SHEET_ANIM_MS, easing: Easing.out(Easing.cubic), useNativeDriver: false,
@@ -240,27 +366,42 @@ export const ReelCard = memo(function ReelCard({
         if (finished) setDetailsMounted(false);
       });
     }
-  }, [detailsOpen, sheetAnim]);
+  }, [panelOpen, sheetAnim]);
 
   // ↔ زرار الرجوع فى أندرويد وهو فاتح اللوحة يقفلها بدل ما يسيب شاشة
   // الريلز بالكامل — متوقّع من أي "sheet" بيتفتح فوق شاشة قائمة.
   useEffect(() => {
     if (!isActive) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (detailsOpen) {
-        onCloseDetails();
+      if (panelOpen) {
+        closeSheetRef.current();
         return true;
       }
       return false;
     });
     return () => sub.remove();
-  }, [isActive, detailsOpen, onCloseDetails]);
+  }, [isActive, panelOpen]);
 
-  const mediaHeight = sheetAnim.interpolate({ inputRange: [0, 1], outputRange: [reelHeight, MINI_MEDIA_HEIGHT] });
-  const sheetHeight = Math.max(reelHeight - MINI_MEDIA_HEIGHT - controlsBottomOffset, 0);
+  // ↔ أثناء كتابة تعليق: الريل أصغر، ومفيش فراغ سفلى لشريط المهام (الكيبورد فوقه)، وعلى آيفون اللوحة بتقف فوق الكيبورد مباشرة.
+  const typing = sheetKind === "comments" && kb.visible;
+  const miniH = typing ? COMPACT_MEDIA_HEIGHT : MINI_MEDIA_HEIGHT;
+  const bottomGap = typing ? 0 : controlsBottomOffset;
+  const mediaHeight = sheetAnim.interpolate({ inputRange: [0, 1], outputRange: [reelHeight, miniH] });
+  const sheetHeight = Math.max(reelHeight - miniH - bottomGap - (sheetKind === "comments" ? kb.inset : 0), 0);
+  const sheetHeightRef = useRef(sheetHeight);
+  sheetHeightRef.current = sheetHeight;
   const sheetTranslateY = sheetAnim.interpolate({ inputRange: [0, 1], outputRange: [sheetHeight, 0] });
   const mediaOverlayOpacity = sheetAnim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [1, 0, 0] });
   const miniHandleOpacity = sheetAnim;
+
+  // ↔ ارتفاع صندوق الفيديو: فى الوضع العادى = ارتفاع الفيديو الطبيعى بعرض الكارت (أو ارتفاع الشاشة لو أقل)،
+  // ومع فتح لوحة التفاصيل بيتقلّص مع mediaHeight لحد المينى-بلاير. الفيديو العريض (landscape) أو اللى
+  // نسبته لسه مجهولة بيفضل زى ما كان (متوسَّط contain).
+  const naturalVideoH = videoAspect != null && videoAspect < 1 && cardW > 0 ? Math.min(reelHeight, cardW / videoAspect) : null;
+  const videoBoxHeight = naturalVideoH != null && naturalVideoH > miniH
+    ? mediaHeight.interpolate({ inputRange: [miniH, reelHeight], outputRange: [miniH, naturalVideoH], extrapolate: "clamp" })
+    : mediaHeight;
+  const videoBoxReady = videoAspect != null || aspectTimedOut || videoStarted;
 
   // ↔ #2 (صفحة تفاصيل العقار): سحب اللوحة لأسفل لازم يقفلها ويرجّع الريل
   // fullscreen كامل تانى (الوصف/الكماليات والمرافق/المخطط تختفي، بالظبط
@@ -281,14 +422,14 @@ export const ReelCard = memo(function ReelCard({
     sheetAnim.stopAnimation((value) => { dragStartValue.current = value; });
   }
   function handleSheetDragMove(_evt: unknown, gesture: PanResponderGestureState) {
-    if (gesture.dy <= 0 || sheetHeight <= 0) return;
-    const draggedPct = Math.min(1, gesture.dy / sheetHeight);
+    if (gesture.dy <= 0 || sheetHeightRef.current <= 0) return;
+    const draggedPct = Math.min(1, gesture.dy / sheetHeightRef.current);
     sheetAnim.setValue(Math.max(0, dragStartValue.current - draggedPct));
   }
   function handleSheetDragRelease(_evt: unknown, gesture: PanResponderGestureState) {
-    const shouldClose = gesture.dy > sheetHeight * 0.25 || gesture.vy > 0.8;
+    const shouldClose = gesture.dy > sheetHeightRef.current * 0.25 || gesture.vy > 0.8;
     if (shouldClose) {
-      onCloseDetails();
+      closeSheetRef.current();
     } else {
       Animated.timing(sheetAnim, {
         toValue: 1, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: false,
@@ -321,7 +462,6 @@ export const ReelCard = memo(function ReelCard({
   // بيلمس بس). فى أي حالة تانية (لسه بيمرّر جوه المحتوى، أو بيدوس على
   // زرار/رابط جوه الوصف) بترجع false فورًا، فالـ ScrollView والعناصر
   // اللي جواها تفضل شغالة عادي 100% من غير أي تعارض.
-  const contentScrollY = useRef(0);
   const contentPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponderCapture: () => false,
@@ -336,41 +476,53 @@ export const ReelCard = memo(function ReelCard({
 
   return (
     <View style={{ height: reelHeight, backgroundColor: "#000" }}>
-      <Animated.View style={{ height: mediaHeight, width: "100%", overflow: "hidden", backgroundColor: "#000" }}>
+      <Animated.View style={{ height: mediaHeight, width: "100%", overflow: "hidden", backgroundColor: "#000" }} onLayout={(e) => setCardW(e.nativeEvent.layout.width)}>
         {mode === "video" && video ? (
           <>
-            {isNearActive && (
-              <ReelVideoPlayer
-                ref={videoRef}
-                uri={video.url}
-                isActive={isActive}
-                paused={holdPaused}
-                speed={speed}
-                // ↔ #4 (تمرير تلقائي): لما autoAdvance مفعّل، الفيديو مبيلفّش
-                // تانى من نفسه — بيوصل لنهايته فعليًا (playToEnd جوه
-                // ReelVideoPlayer.tsx) عشان الشاشة الأب تقدر تنتقل للريل اللي
-                // بعده. لما يبقى معطّل، بيرجع لسلوك اللف اللانهائي الأصلي.
-                autoAdvance={autoAdvance}
-                // ↔ #4 (كتم صوت الخلفية): بيضيف تفضيل الكتم اليدوي فوق شرط
-                // "مش الريل النشط" الموجود أصلاً (isActive) بدل ما يستبدله.
-                muted={!isActive || musicMuted}
-                onPosition={onVideoPosition}
-                onFinished={onVideoFinished}
-                onPlayingChange={(playing) => { if (playing) setVideoStarted(true); }}
-                onPiPClosed={() => setPaused(true)}
-              />
-            )}
-            {/* ↔ perf audit fix #1 (محدّث): الكروت خارج النطاق القريب من الريل
-                النشط ما فيهاش player حقيقي — بتعرض بس البوستر. والكروت
-                القريبة بتعرض نفس البوستر فوق الفيديو لحد ما يشتغل فعليًا.
-                contentFit=contain زي VideoView بالظبط عشان التبديل بينهم
-                يبقى من غير أي قفزة فى الشكل. pointerEvents=none عشان مفيش
-                لمسة تتبلع (نفس سبب الباغ الموثّق فى ReelVideoPlayer). */}
-            {!(isNearActive && videoStarted) && (
-              <View style={StyleSheet.absoluteFill} pointerEvents="none">
-                <Image source={{ uri: cldReelPoster(video.url) }} style={StyleSheet.absoluteFill} contentFit="contain" />
+            {/* ↔ مجسّ نسبة الفيديو: صورة بوستر مخفية (1×1) لحد ما النسبة تتعرف — بيشتغل حتى لو الفيديو
+                بدأ يشتغل قبل ما بوستر الواجهة يتحمّل. */}
+            {videoAspect == null && (
+              <View style={{ position: "absolute", width: 1, height: 1, opacity: 0 }} pointerEvents="none">
+                <Image source={{ uri: cldReelPoster(video.url) }} style={{ width: 1, height: 1 }} onLoad={handlePosterLoad} />
               </View>
             )}
+            <Animated.View
+              style={{ position: "absolute", top: 0, left: 0, right: 0, height: videoBoxHeight, overflow: "hidden", opacity: videoBoxReady ? 1 : 0 }}
+              pointerEvents="none"
+            >
+              {isNearActive && (
+                <ReelVideoPlayer
+                  ref={videoRef}
+                  uri={video.url}
+                  isActive={isActive}
+                  paused={holdPaused}
+                  speed={speed}
+                  // ↔ #4 (تمرير تلقائي): لما autoAdvance مفعّل، الفيديو مبيلفّش
+                  // تانى من نفسه — بيوصل لنهايته فعليًا (playToEnd جوه
+                  // ReelVideoPlayer.tsx) عشان الشاشة الأب تقدر تنتقل للريل اللي
+                  // بعده. لما يبقى معطّل، بيرجع لسلوك اللف اللانهائي الأصلي.
+                  autoAdvance={autoAdvance}
+                  // ↔ #4 (كتم صوت الخلفية): بيضيف تفضيل الكتم اليدوي فوق شرط
+                  // "مش الريل النشط" الموجود أصلاً (isActive) بدل ما يستبدله.
+                  muted={!isActive || musicMuted}
+                  onPosition={onVideoPosition}
+                  onFinished={onVideoFinished}
+                  onPlayingChange={(playing) => { if (playing) setVideoStarted(true); }}
+                  onPiPClosed={() => setPaused(true)}
+                />
+              )}
+              {/* ↔ perf audit fix #1 (محدّث): الكروت خارج النطاق القريب من الريل
+                  النشط ما فيهاش player حقيقي — بتعرض بس البوستر. والكروت
+                  القريبة بتعرض نفس البوستر فوق الفيديو لحد ما يشتغل فعليًا.
+                  contentFit=contain زي VideoView بالظبط عشان التبديل بينهم
+                  يبقى من غير أي قفزة فى الشكل. pointerEvents=none عشان مفيش
+                  لمسة تتبلع (نفس سبب الباغ الموثّق فى ReelVideoPlayer). */}
+              {!(isNearActive && videoStarted) && (
+                <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                  <Image source={{ uri: cldReelPoster(video.url) }} style={StyleSheet.absoluteFill} contentFit="contain" onLoad={handlePosterLoad} />
+                </View>
+              )}
+            </Animated.View>
           </>
         ) : mode === "slideshow" && images.length > 0 ? (
           // ↔ #3: "من غير ما يقتصّه" — contentFit يتغيّر لـ contain وهو
@@ -442,8 +594,9 @@ export const ReelCard = memo(function ReelCard({
           )}
 
           <ReelActionRail
-            seller={property.seller}
+            seller={seller}
             likes={property.likes}
+            comments={property.comments ?? 0}
             liked={isLiked}
             saved={isFavorite}
             following={isFollowing}
@@ -451,6 +604,7 @@ export const ReelCard = memo(function ReelCard({
             onOpenSeller={() => onOpenSeller(property.seller.id)}
             onToggleFollow={() => onToggleFollow(property.seller.id)}
             onToggleLike={() => onToggleLike(property.id)}
+            onOpenComments={openComments}
             onShare={() => onShare(property)}
             onToggleSave={() => onToggleFavorite(property.id)}
             onToggleCompare={() => onToggleCompare(property.id)}
@@ -460,7 +614,7 @@ export const ReelCard = memo(function ReelCard({
         {/* ↔ mini-player: الضغط على الريل المصغّر يرجّعه كامل الشاشة تاني
             (زي الضغط على الـ mini-player بتاع يوتيوب شورتس عشان يتكبّر) */}
         {detailsMounted && (
-          <Pressable style={StyleSheet.absoluteFill} onPress={onCloseDetails}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeSheet}>
             <Animated.View style={[styles.miniHandleWrap, { opacity: miniHandleOpacity }]} pointerEvents="none">
               <View style={styles.miniHandle} />
             </Animated.View>
@@ -474,24 +628,34 @@ export const ReelCard = memo(function ReelCard({
         >
           <View style={styles.sheetGrabRow} {...sheetPanResponder.panHandlers}>
             <View style={[styles.sheetGrabHandle, { backgroundColor: themeColors.border }]} />
-            <Pressable style={[styles.sheetCloseBtn, { backgroundColor: themeColors.surface }]} onPress={onCloseDetails} hitSlop={10}>
+            <Pressable style={[styles.sheetCloseBtn, { backgroundColor: themeColors.surface }]} onPress={closeSheet} hitSlop={10}>
               <Svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={themeColors.textSubtle} strokeWidth={2.5}>
                 <Path d="M6 6l12 12M18 6L6 18" />
               </Svg>
             </Pressable>
           </View>
+          {sheetKind === "comments" ? (
+            <ReelCommentsPanel
+              property={property}
+              scrollAreaProps={contentPanResponder.panHandlers}
+              onScrollY={(y) => { contentScrollY.current = y; }}
+            />
+          ) : (
+            <>
           <View style={{ flex: 1 }} {...contentPanResponder.panHandlers}>
-            <ScrollView
-              style={{ flex: 1 }}
-              contentContainerStyle={{ paddingBottom: 16 }}
-              showsVerticalScrollIndicator={false}
-              onScroll={(e) => { contentScrollY.current = e.nativeEvent.contentOffset.y; }}
-              scrollEventThrottle={16}
-            >
-              <PropertyDetailsContent property={property} />
-            </ScrollView>
-          </View>
-          <PropertyCtaBar property={property} />
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: 16 }}
+                showsVerticalScrollIndicator={false}
+                onScroll={(e) => { contentScrollY.current = e.nativeEvent.contentOffset.y; }}
+                scrollEventThrottle={16}
+              >
+                <PropertyDetailsContent property={property} />
+              </ScrollView>
+            </View>
+            <PropertyCtaBar property={property} />
+            </>
+          )}
         </Animated.View>
       )}
     </View>

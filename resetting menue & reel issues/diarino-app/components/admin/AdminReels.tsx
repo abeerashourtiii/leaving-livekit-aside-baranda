@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ComponentProps } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet, Modal, Linking, StyleProp, ViewStyle } from "react-native";
+import { View, Text, TextInput, Pressable, StyleSheet, Modal, Linking, StyleProp, ViewStyle, Switch } from "react-native";
 import { Image } from "expo-image";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { useAdminDB, setReelStatus, deleteReel } from "../../lib/hooks/useAdminDB";
+import { useAdminDB, setReelStatus, deleteReel, getAdminLoadError, refetchAdminDB } from "../../lib/hooks/useAdminDB";
+import { useReelApprovalRequired, useSetReelApprovalRequired } from "../../lib/hooks/useModerationSettings";
 import { cldOptimized, cldThumbnail } from "../../lib/cloudinary";
 import { StatusChip } from "./StatusChip";
 import { ConfirmModal } from "../shared/ConfirmModal";
@@ -10,9 +11,12 @@ import { showToast } from "../shared/Toast";
 import { AdminReel, ReelStatus } from "../../data/mock-admin";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 
-const FILTERS: { key: "all" | ReelStatus; label: string }[] = [
+// ↔ «قديمة»: أقدم من 30 يومًا — صاحب الإعلان لا يحذفه بعد 24 ساعة من النشر، فحذف الإعلانات القديمة/غير الفعّالة من حق المشرفين (migration 20261021000000).
+const OLD_CUTOFF = () => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const FILTERS: { key: "all" | "old" | ReelStatus; label: string }[] = [
   { key: "all", label: "الكل" }, { key: "pending", label: "قيد المراجعة" },
   { key: "approved", label: "منشورة" }, { key: "rejected", label: "مرفوضة" },
+  { key: "old", label: "قديمة (+30 يومًا)" },
 ];
 
 // ↔ "وسّع انتشار إعلانك" في شاشة النشر — نفس الأربع منصات، معروضة هنا
@@ -23,10 +27,17 @@ const PLATFORM_LABELS: Record<string, string> = {
 
 export function AdminReels() {
   const db = useAdminDB();
-  const [filter, setFilter] = useState<"all" | ReelStatus>("all");
+  const [filter, setFilter] = useState<"all" | "old" | ReelStatus>("all");
   const [query, setQuery] = useState("");
   const [previewReel, setPreviewReel] = useState<AdminReel | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // ↔ قبول/رفض/حذف: الرفض والحذف بيطلبوا سببًا اختياريًا (بيوصل المعلن فى إشعار وعلى كارت إعلانه).
+  const [reasonFor, setReasonFor] = useState<{ id: string; action: "reject" | "delete"; title: string } | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmTurnOff, setConfirmTurnOff] = useState(false);
+  const { required: approvalRequired } = useReelApprovalRequired();
+  const setApprovalRequired = useSetReelApprovalRequired();
+  const loadError = getAdminLoadError();
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
 
@@ -36,7 +47,7 @@ export function AdminReels() {
     // الحالة، فإعلان معلّق من ٣ أيام ممكن يظهر تحت عشرات الإعلانات
     // المقبولة الأحدث منه، والأدمن يفوّته بسهولة.
     return db.reels
-      .filter((r) => (filter === "all" || r.status === filter))
+      .filter((r) => filter === "all" || (filter === "old" ? r.date < OLD_CUTOFF() : r.status === filter))
       .filter((r) => !query || r.title.includes(query) || r.owner.includes(query))
       .sort((a, b) => {
         if (a.status === b.status) return 0;
@@ -59,14 +70,44 @@ export function AdminReels() {
     return { counts, withAny };
   }, [db.reels]);
 
-  function approve(id: string) { setReelStatus(id, "approved"); showToast("✓ تم قبول الريلز"); }
-  function reject(id: string) { setReelStatus(id, "rejected"); showToast("✕ تم رفض الريلز"); }
-  function confirmDelete() {
-    if (!confirmDeleteId) return;
-    deleteReel(confirmDeleteId);
-    showToast("🗑️ تم الحذف");
-    setConfirmDeleteId(null);
-    setPreviewReel(null);
+  const pendingCount = useMemo(() => db.reels.filter((r) => r.status === "pending").length, [db.reels]);
+
+  async function approve(id: string) {
+    const res = await setReelStatus(id, "approved");
+    showToast(res.ok ? "✓ تم قبول الريلز ونُشر للجميع وأُشعر المعلن" : `تعذر القبول: ${res.error ?? ""}`);
+  }
+  function askReason(r: { id: string; title: string }, action: "reject" | "delete") {
+    setReason("");
+    setReasonFor({ id: r.id, action, title: r.title });
+  }
+  async function confirmReason() {
+    if (!reasonFor || busy) return;
+    setBusy(true);
+    const { id, action } = reasonFor;
+    const res = action === "reject" ? await setReelStatus(id, "rejected", reason) : await deleteReel(id, reason);
+    setBusy(false);
+    if (res.ok) {
+      showToast(action === "reject" ? "✕ تم رفض الريلز وأُشعر المعلن" : "🗑️ تم حذف الريلز وأُشعر المعلن");
+      setReasonFor(null);
+      if (action === "delete") setPreviewReel(null);
+    } else {
+      showToast(`تعذر التنفيذ: ${res.error ?? ""}`);
+    }
+  }
+  function toggleApproval(next: boolean) {
+    // التعطيل يغيّر سلوك كل الإعلانات الجديدة => نطلب تأكيد. التفعيل مباشر.
+    if (!next) { setConfirmTurnOff(true); return; }
+    setApprovalRequired.mutate(true, {
+      onSuccess: () => showToast("✓ الموافقة مطلوبة قبل النشر: الإعلانات الجديدة تُراجَع أولًا"),
+      onError: () => showToast("تعذر تغيير الإعداد (صلاحية إدارة الريلز؟)"),
+    });
+  }
+  function confirmTurnOffApproval() {
+    setConfirmTurnOff(false);
+    setApprovalRequired.mutate(false, {
+      onSuccess: () => showToast("✓ تم تعطيل الموافقة: الإعلانات الجديدة تُنشر فورًا"),
+      onError: () => showToast("تعذر تغيير الإعداد (صلاحية إدارة الريلز؟)"),
+    });
   }
   function downloadVideo(url: string | null) {
     if (!url) { showToast("لا يوجد فيديو لهذا الريلز"); return; }
@@ -75,6 +116,37 @@ export function AdminReels() {
 
   return (
     <View style={{ gap: 12 }}>
+      {/* ↔ مفتاح اشتراط الموافقة قبل النشر + عدّاد المنتظر مراجعة */}
+      <View style={styles.statsCard}>
+        <View style={styles.approvalRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.statsTitle}>اشتراط موافقة الأدمن قبل نشر الريلز</Text>
+            <Text style={styles.approvalHint}>
+              {approvalRequired
+                ? "مفعَّل: كل إعلان جديد يظهر للمعلن «قيد المراجعة» ولا يُنشر للجميع إلا بعد قبولك. تعديل المعلن لمحتوى إعلانه المنشور يعيده للمراجعة."
+                : "معطَّل: كل إعلان جديد يُنشر فورًا للجميع دون انتظار موافقتك (ما زال بإمكانك رفض أو حذف أي ريلز)."}
+            </Text>
+          </View>
+          <Switch
+            value={approvalRequired}
+            onValueChange={toggleApproval}
+            disabled={setApprovalRequired.isPending}
+            trackColor={{ false: "#cbd5e1", true: "#86efac" }}
+            thumbColor={approvalRequired ? "#16a34a" : "#f8fafc"}
+          />
+        </View>
+        {pendingCount > 0 && <Text style={styles.pendingNote}>⏳ {pendingCount} ريلز بانتظار مراجعتك</Text>}
+      </View>
+
+      {loadError && (
+        <View style={styles.errorCard}>
+          <Text style={styles.errorText}>تعذر تحميل بعض بيانات لوحة التحكم ({loadError}). قد لا تظهر قائمة الريلز كاملة.</Text>
+          <Pressable style={styles.errorBtn} onPress={() => { void refetchAdminDB(); }}>
+            <Text style={styles.errorBtnText}>إعادة المحاولة</Text>
+          </Pressable>
+        </View>
+      )}
+
       {platformStats.withAny > 0 && (
         <View style={styles.statsCard}>
           <Text style={styles.statsTitle}>طلبات النشر على منصات Baranda</Text>
@@ -92,7 +164,7 @@ export function AdminReels() {
       <View style={styles.filterRow}>
         {FILTERS.map((f) => (
           <Pressable key={f.key} style={filter === f.key ? styles.chipActive : styles.chip} onPress={() => setFilter(f.key)}>
-            <Text style={filter === f.key ? styles.chipActiveText : styles.chipText}>{f.label}</Text>
+            <Text style={filter === f.key ? styles.chipActiveText : styles.chipText}>{f.label}{f.key === "pending" && pendingCount > 0 ? ` (${pendingCount})` : ""}</Text>
           </Pressable>
         ))}
       </View>
@@ -119,9 +191,9 @@ export function AdminReels() {
               </View>
             </View>
             <View style={styles.actions}>
-              {r.status !== "approved" && <ActionBtn label="قبول" bg="#dcfce7" fg="#166534" onPress={() => approve(r.id)} />}
-              {r.status !== "rejected" && <ActionBtn label="رفض" bg="#fee2e2" fg="#991b1b" onPress={() => reject(r.id)} />}
-              <ActionBtn label="حذف" bg={themeColors.isDark ? "#334155" : "#0f172a"} fg="white" onPress={() => setConfirmDeleteId(r.id)} />
+              {r.status !== "approved" && <ActionBtn label="قبول" bg="#dcfce7" fg="#166534" onPress={() => { void approve(r.id); }} />}
+              {r.status !== "rejected" && <ActionBtn label="رفض" bg="#fee2e2" fg="#991b1b" onPress={() => askReason(r, "reject")} />}
+              <ActionBtn label="حذف" bg={themeColors.isDark ? "#334155" : "#0f172a"} fg="white" onPress={() => askReason(r, "delete")} />
             </View>
           </Pressable>
         ))
@@ -167,22 +239,51 @@ export function AdminReels() {
               {previewReel.sharePlatforms.length > 0 && (
                 <ActionBtn label="تحميل الفيديو" bg="#eef2ff" fg="#4338ca" onPress={() => downloadVideo(previewReel.videoUrl)} />
               )}
-              <ActionBtn label="قبول" bg="#dcfce7" fg="#166534" onPress={() => { approve(previewReel.id); setPreviewReel(null); }} />
-              <ActionBtn label="رفض" bg="#fee2e2" fg="#991b1b" onPress={() => { reject(previewReel.id); setPreviewReel(null); }} />
-              <ActionBtn label="حذف" bg={themeColors.isDark ? "#334155" : "#0f172a"} fg="white" onPress={() => setConfirmDeleteId(previewReel.id)} />
+              {/* ↔ على iOS ما ينفعش Modal فوق Modal: نقفل المعاينة الأول ثم نفتح نافذة السبب بعد ما تتقفل. */}
+              <ActionBtn label="قبول" bg="#dcfce7" fg="#166534" onPress={() => { const id = previewReel.id; setPreviewReel(null); void approve(id); }} />
+              <ActionBtn label="رفض" bg="#fee2e2" fg="#991b1b" onPress={() => { const r = previewReel; setPreviewReel(null); setTimeout(() => askReason(r, "reject"), 350); }} />
+              <ActionBtn label="حذف" bg={themeColors.isDark ? "#334155" : "#0f172a"} fg="white" onPress={() => { const r = previewReel; setPreviewReel(null); setTimeout(() => askReason(r, "delete"), 350); }} />
+            </View>
+          </View>
+        )}
+      </Modal>
+
+      {/* ↔ نافذة السبب (اختيارى) للرفض والحذف — السبب بيوصل المعلن فى إشعار وبيظهر على كارت إعلانه (الرفض). */}
+      <Modal visible={!!reasonFor} transparent animationType="fade" onRequestClose={() => setReasonFor(null)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => !busy && setReasonFor(null)} />
+        {reasonFor && (
+          <View style={styles.reasonCard}>
+            <Text style={styles.reasonTitle}>{reasonFor.action === "reject" ? "رفض الريلز" : "حذف الريلز نهائيًا"}</Text>
+            <Text style={styles.reasonSub} numberOfLines={2}>{reasonFor.title}</Text>
+            <TextInput
+              style={styles.reasonInput}
+              value={reason}
+              onChangeText={setReason}
+              placeholder="اكتب السبب (اختياري) — يصل للمعلن في إشعار"
+              placeholderTextColor={themeColors.textSubtle}
+              multiline
+              maxLength={300}
+            />
+            <View style={styles.reasonActions}>
+              <Pressable style={styles.reasonCancel} onPress={() => setReasonFor(null)} disabled={busy}>
+                <Text style={styles.reasonCancelText}>تراجع</Text>
+              </Pressable>
+              <Pressable style={[styles.reasonConfirm, busy && { opacity: 0.6 }]} onPress={() => { void confirmReason(); }} disabled={busy}>
+                <Text style={styles.reasonConfirmText}>{busy ? "..." : reasonFor.action === "reject" ? "رفض" : "حذف"}</Text>
+              </Pressable>
             </View>
           </View>
         )}
       </Modal>
 
       <ConfirmModal
-        visible={!!confirmDeleteId}
-        title="حذف الريلز"
-        text="حذف هذا الريلز نهائياً؟"
-        confirmLabel="حذف"
+        visible={confirmTurnOff}
+        title="تعطيل الموافقة المسبقة"
+        text="بعد التعطيل سيُنشر كل إعلان جديد فورًا للجميع دون مراجعتك. يمكنك دائمًا رفض أو حذف أي ريلز لاحقًا. هل تريد المتابعة؟"
+        confirmLabel="تعطيل"
         danger
-        onCancel={() => setConfirmDeleteId(null)}
-        onConfirm={confirmDelete}
+        onCancel={() => setConfirmTurnOff(false)}
+        onConfirm={confirmTurnOffApproval}
       />
     </View>
   );
@@ -274,6 +375,22 @@ function createStyles(themeColors: ThemeColors) {
     kvVal: { fontSize: 12, fontWeight: "900", color: themeColors.text },
     modalActions: { flexDirection: "row", gap: 8, justifyContent: "flex-end", marginTop: 16, flexWrap: "wrap" },
     statsCard: { backgroundColor: themeColors.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: themeColors.border },
+    approvalRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+    approvalHint: { fontSize: 11.5, lineHeight: 18, color: themeColors.textSubtle, marginTop: -4 },
+    pendingNote: { marginTop: 10, fontSize: 12.5, fontWeight: "900", color: "#B45309" },
+    errorCard: { backgroundColor: themeColors.isDark ? "rgba(220,38,38,0.15)" : "#fef2f2", borderRadius: 12, padding: 12, gap: 8, borderWidth: 1, borderColor: "#fecaca" },
+    errorText: { fontSize: 12, lineHeight: 19, color: "#991b1b", fontWeight: "700" },
+    errorBtn: { alignSelf: "flex-start", backgroundColor: "#991b1b", borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7 },
+    errorBtnText: { color: "white", fontSize: 12, fontWeight: "900" },
+    reasonCard: { position: "absolute", left: 20, right: 20, top: "28%", backgroundColor: themeColors.card, borderRadius: 18, padding: 16, gap: 10 },
+    reasonTitle: { fontSize: 15, fontWeight: "900", color: themeColors.text },
+    reasonSub: { fontSize: 12.5, color: themeColors.textSubtle, lineHeight: 19 },
+    reasonInput: { minHeight: 80, textAlignVertical: "top", backgroundColor: themeColors.surface, borderRadius: 12, padding: 12, fontSize: 13, color: themeColors.text, borderWidth: 1, borderColor: themeColors.border },
+    reasonActions: { flexDirection: "row", gap: 10 },
+    reasonCancel: { flex: 1, borderRadius: 999, paddingVertical: 11, alignItems: "center", borderWidth: 1, borderColor: themeColors.border },
+    reasonCancelText: { fontSize: 13, fontWeight: "900", color: themeColors.textMuted },
+    reasonConfirm: { flex: 1, borderRadius: 999, paddingVertical: 11, alignItems: "center", backgroundColor: "#dc2626" },
+    reasonConfirmText: { fontSize: 13, fontWeight: "900", color: "white" },
     statsTitle: { fontSize: 12.5, fontWeight: "900", color: themeColors.text, marginBottom: 10 },
     statsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
     statChip: { backgroundColor: themeColors.surface, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 14, alignItems: "center", minWidth: 74 },

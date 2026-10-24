@@ -1,5 +1,5 @@
-import { ReactNode } from "react";
-import { View, Text, Pressable, StyleSheet, I18nManager } from "react-native";
+import { ReactNode, useState } from "react";
+import { View, Text, Pressable, StyleSheet, I18nManager, Platform } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Path, Circle } from "react-native-svg";
@@ -10,6 +10,8 @@ import {
   menuArtCardFor,
 } from "../../lib/menuIconRegistry";
 import { cldOptimized } from "../../lib/cloudinary";
+import { physicalSide } from "../../lib/rtl";
+import { InfoBadge, ProtectInfoModal, INFO_BADGE_GUTTER } from "./ProtectInvestmentInfo";
 import { useMyAvatar } from "../../lib/hooks/useMyAvatar";
 
 // ↔ كروت صفحة "القائمة" (كانت جوه app/(tabs)/menu.tsx) — اتنقلت هنا وأُعيد
@@ -123,6 +125,8 @@ export function MenuCard({
   shape?: "rect" | "circle"; minHeight?: number; iconBoxHeight?: number;
 }) {
   const { t, language } = useLanguage();
+  // ↔ نافذة توضيح «احمي استثمارك» (تُفتح من علامة «!» على الكارت)
+  const [infoOpen, setInfoOpen] = useState(false);
   const textColor = textColorFor(item.color);
   const fg = item.fontColor ?? textColor;
   const subtitleColor = item.fontColor
@@ -206,7 +210,7 @@ export function MenuCard({
   // عنوانه/الأيقونة من لوحة الأدمن.
   const art = shape === "circle" ? null : menuArtCardFor(item);
   if (art) {
-    return (
+    const card = (
       <Shell color={art.bg} flex={flex} minHeight={minHeight} aspect={art.aspect}>
         <Pressable
           accessibilityRole="button"
@@ -218,6 +222,24 @@ export function MenuCard({
           {!!art.rim && <View pointerEvents="none" style={[styles.artRim, { borderColor: art.rim }]} />}
         </Pressable>
       </Shell>
+    );
+    if (art.infoPopup !== "protect") return card;
+
+    // ↔ كارت «احمي استثمارك»: علامة «!» فى الركن الأعلى الأيمن (الجهة اليمين فعليًا على كل المنصات) من غير ما تغطى محتوى الكارت:
+    //   حوالين الكارت مساحة إضافية (أعلى + يمين) والعلامة جواها. الضغط على الكارت نفسه = واتساب كالمعتاد، والعلامة = نافذة التوضيح.
+    const rightSide = physicalSide(false);
+    const gutter = { paddingTop: INFO_BADGE_GUTTER, [rightSide === "right" ? "paddingRight" : "paddingLeft"]: INFO_BADGE_GUTTER } as const;
+    return (
+      <View style={[flex ? { flex: 1 } : null, gutter]}>
+        {card}
+        <InfoBadge onPress={() => setInfoOpen(true)} label={t("معلومات عن الخدمة")} />
+        <ProtectInfoModal
+          visible={infoOpen}
+          onClose={() => setInfoOpen(false)}
+          // آيفون: ما ينفعش نفتح واتساب والـ Modal لسه بيتقفل فنستنى شوية؛ الويب/أندرويد مباشرة (الويب بيحتاج نفس لحظة لمسة المستخدم عشان ما يتحجبش popup).
+          onContact={() => { setInfoOpen(false); if (Platform.OS === "ios") setTimeout(onPress, 350); else onPress(); }}
+        />
+      </View>
     );
   }
 

@@ -151,7 +151,7 @@ const MENU_COLUMNS_FULL = "id, title, subtitle, color, icon_key, size, action_ty
 // 20260929010000) الأول، ولو الـ migration لسه ما اتطبّقتش على قاعدة
 // البيانات (Postgres بيرجّع خطأ عمود غير موجود) بيرجع تلقائيًا للأعمدة
 // القديمة بدل ما صفحة القائمة كلها تفضل فاضية.
-async function fetchMenuRows(activeOnly: boolean): Promise<MenuItem[]> {
+export async function fetchMenuRows(activeOnly: boolean): Promise<MenuItem[]> {
   async function run(columns: string) {
     let q = supabase.from("menu_items").select(columns);
     if (activeOnly) q = q.eq("active", true);

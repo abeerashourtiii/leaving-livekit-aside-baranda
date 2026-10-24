@@ -37,13 +37,17 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { serveWithCors } from "../_shared/cors.ts";
 
-type NotifCategory = "like" | "save" | "follow" | "chat" | "new_match" | "price_drop";
+type NotifCategory = "like" | "save" | "follow" | "chat" | "new_match" | "price_drop" | "comment" | "offer" | "approval";
 
 const TITLE_BY_CATEGORY: Record<NotifCategory, string> = {
   like: "إعجاب جديد",
   save: "حفظ جديد",
   follow: "متابع جديد",
-  chat: "رسالة جديدة",
+  // ↔ رسائل المحادثات = رسائل العروض (على ريلز أو طلبات): تظهر فى صفحة «العروض» وليس جرس الإشعارات.
+  chat: "رسالة جديدة في العروض",
+  comment: "تعليق جديد",
+  offer: "عرض جديد",
+  approval: "قرار على إعلانك",
   new_match: "عقار جديد يطابق تنبيهك",
   price_drop: "انخفاض سعر",
 };

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabase";
 import { useCurrentUser } from "./useCurrentUser";
+import { retryWithTimeout } from "../async";
 
 // ↔ checkAdmin(uid) — queries user_roles for an 'admin' row matching the
 // current user. Granting used to be a manual/server-side-only action;
@@ -17,7 +18,11 @@ export type AdminSection =
   | "sponsoredReels"
   | "auditLog"
   | "userActivity"
-  | "menuItems";
+  | "menuItems"
+  | "music"
+  | "deals"
+  | "offers"
+  | "requests";
 
 type UserRoleRow = {
   role: string;
@@ -50,12 +55,16 @@ export function useIsAdmin() {
 
     async function fetchAdminStatus(userId: string) {
       try {
-        const { data, error } = await supabase
-          .from("user_roles")
-          .select("role, is_super_admin, full_access, permissions")
-          .eq("user_id", userId)
-          .eq("role", "admin")
-          .maybeSingle();
+        // ↔ إصلاح «لوحة التحكم فاضية/معلّقة»: الطلب بلا مهلة وبمحاولة واحدة؛ دلوقتي مرتين بمهلة 8 ثوانٍ لكل محاولة.
+        const { data, error } = await retryWithTimeout(
+          () => supabase
+            .from("user_roles")
+            .select("role, is_super_admin, full_access, permissions")
+            .eq("user_id", userId)
+            .eq("role", "admin")
+            .maybeSingle(),
+          { attempts: 3, timeoutMs: 8000, label: "admin-role" },
+        );
 
         if (error) throw error;
 

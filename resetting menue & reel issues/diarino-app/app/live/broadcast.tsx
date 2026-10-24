@@ -99,6 +99,8 @@ function BroadcastFlow() {
   const [title, setTitle] = useState("");
   const [phase, setPhase] = useState<"setup" | "starting" | "live">("setup");
   const [startError, setStartError] = useState<Error | null>(null);
+  // ↔ إقرار الحقوق قبل البث (سياسة حقوق النشر): إلزامى لتفعيل «ابدأ البث».
+  const [rightsAccepted, setRightsAccepted] = useState(false);
   const [initialFacingMode, setInitialFacingMode] = useState<"user" | "environment">("user");
 
   const roomName = useMemo(() => `live_${user?.id ?? "anon"}_${Date.now()}`, [user?.id]);
@@ -176,10 +178,25 @@ function BroadcastFlow() {
           </Pressable>
         </View>
 
+        <Pressable
+          style={styles.rightsRow}
+          onPress={() => setRightsAccepted((v) => !v)}
+          disabled={phase === "starting"}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: rightsAccepted }}
+        >
+          <View style={[styles.rightsBox, rightsAccepted && styles.rightsBoxOn]}>
+            {rightsAccepted && <Text style={styles.rightsMark}>✓</Text>}
+          </View>
+          <Text style={styles.rightsLabel}>
+            {t("أقرّ بأنني مالك حقوق كل ما سأبثه أو مرخَّص لي به، وأنه لا يحوي موسيقى أو مقاطع مقتبسة من غيري، وأنني سأُعلم الحاضرين بأن البث قد يُسجَّل، وأتحمل المسؤولية القانونية الكاملة عن ذلك.")}
+          </Text>
+        </Pressable>
+
         {startError && <Text style={styles.wordCountError}>{startError.message}</Text>}
         <Pressable
-          style={[styles.goLiveBtn, (!titleValid || phase === "starting") && styles.goLiveBtnDisabled]}
-          disabled={!titleValid || phase === "starting"}
+          style={[styles.goLiveBtn, (!titleValid || !rightsAccepted || phase === "starting") && styles.goLiveBtnDisabled]}
+          disabled={!titleValid || !rightsAccepted || phase === "starting"}
           onPress={startBroadcast}
         >
           <Text style={styles.goLiveBtnText}>{phase === "starting" ? t("جارٍ البدء...") : t("ابدأ البث")}</Text>
@@ -560,6 +577,11 @@ function BroadcasterLiveView({
 
 function createStyles(themeColors: ThemeColors) {
   return StyleSheet.create({
+    rightsRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 6, marginBottom: 12 },
+    rightsBox: { width: 24, height: 24, borderRadius: 7, borderWidth: 2, borderColor: themeColors.textSubtle, alignItems: "center", justifyContent: "center", backgroundColor: themeColors.surface },
+    rightsBoxOn: { backgroundColor: "#22A652", borderColor: "#22A652" },
+    rightsMark: { color: "white", fontSize: 14, fontWeight: "900", lineHeight: 16 },
+    rightsLabel: { flex: 1, fontSize: 12.5, fontWeight: "600", color: themeColors.text, lineHeight: 20 },
     setupContainer: { flex: 1, backgroundColor: themeColors.background, padding: 24, justifyContent: "center", gap: 10 },
     closeSetupBtn: {
       position: "absolute", top: Platform.OS === "ios" ? 54 : 24, left: 20, zIndex: 10,

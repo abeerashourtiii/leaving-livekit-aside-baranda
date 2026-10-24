@@ -108,8 +108,10 @@ export function useDeleteRequest() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("requests").delete().eq("id", id);
+      // ↔ .select("id"): لو RLS منعت الحذف (انتهت الـ 24 ساعة من عرض الطلب = 0 صفوف) ما نعتبرهوش نجح بالغلط.
+      const { data, error } = await supabase.from("requests").delete().eq("id", id).select("id");
       if (error) throw error;
+      if (!data || data.length === 0) throw new Error("delete_not_applied");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
   });

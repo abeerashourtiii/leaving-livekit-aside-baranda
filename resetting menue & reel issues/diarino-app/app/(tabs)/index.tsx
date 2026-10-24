@@ -1,7 +1,9 @@
+import { useOffersTopBar } from "../../lib/hooks/useOffersTopBar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { openNotificationItem } from "../../lib/notificationNavigation";
 import { router } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
-import { View, FlatList, StyleSheet, ViewToken, Share, ListRenderItemInfo } from "react-native";
+import { View, FlatList, StyleSheet, ViewToken, Share, ListRenderItemInfo, AppState } from "react-native";
 import { usePaginatedProperties, usePropertiesByIds, PropertyPageFilters } from "../../lib/hooks/useProperties";
 import { fmtPrice } from "../../lib/types";
 import { ReelCard } from "../../components/reel/ReelCard";
@@ -15,6 +17,7 @@ import { useLikes } from "../../lib/hooks/useLikes";
 import { useCompareSelection } from "../../lib/hooks/useCompareSelection";
 import { showToast } from "../../components/shared/Toast";
 import { useActiveSponsoredReels, useIncrementSponsoredReach } from "../../lib/hooks/useSponsoredReels";
+import { matchesLocationFilter } from "../../lib/sponsorMatch";
 import { ReportModal } from "../../components/shared/ReportModal";
 import { ReelOptionsSheet } from "../../components/reel/ReelOptionsSheet";
 import { useLanguage } from "../../lib/hooks/useLanguage";
@@ -24,6 +27,7 @@ import { reelPagingProps } from "../../lib/reelPaging";
 import { SnapCell } from "../../components/reel/SnapCell";
 import { isPiPActive, usePiPActive } from "../../lib/pipState";
 import { useReelPreferences } from "../../lib/hooks/useReelPreferences";
+import { useReelSheetLocked } from "../../lib/reelSheetLock";
 import { prefetchReelPosters } from "../../lib/reelPrefetch";
 
 // ↔ سرعة التنقل: عدد الريلز اللي بيتجهّز لها player فيديو حقيقي قبل/بعد الريل
@@ -45,9 +49,20 @@ export default function ReelsScreen() {
   // اللي بعده برمجيًا (scrollToOffset) لما ReelCard يبلّغ onFinished.
   const flatListRef = useRef<FlatList<Property>>(null);
   const { autoAdvance } = useReelPreferences();
+  // ↔ لوحة التعليقات مفتوحة جوه ReelCard => تمرير قائمة الريلز متعطّل (lib/reelSheetLock.ts).
+  const commentsLocked = useReelSheetLocked();
 
   // ↔ reelProvinceFilters / reelRegionFilters
   const [filter, setFilter] = useState<ReelFilter>({ provinces: [], regions: [] });
+  const clearFilter = useCallback(() => setFilter({ provinces: [], regions: [] }), []);
+  // ↔ إعادة تعيين الفلتر تلقائيًا عند الخروج من التطبيق (الخلفية). الفلتر محفوظ فى الذاكرة فقط (ليس على الجهاز أو الخادم)،
+  // فبيتصفّر كمان لما التطبيق يتقفل تمامًا. استثناء: أثناء نافذة PiP ما نغيّرش القائمة اللى بيتفرج عليها المستخدم.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" && !isPiPActive()) clearFilter();
+    });
+    return () => sub.remove();
+  }, [clearFilter]);
 
   // ↔ real pagination (agreed plan) — filtering by province/region now
   // happens server-side; useProperties() (the unbounded/capped list) is
@@ -78,6 +93,8 @@ export default function ReelsScreen() {
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [notifMenuVisible, setNotifMenuVisible] = useState(false);
   const notifications = useNotifications();
+  // ↔ أيقونة «العروض» جنب جرس الإشعارات + نقطتها الحمراء (منفصلة عن الجرس).
+  const offersBar = useOffersTopBar();
 
   // ↔ long-press on a reel's info card → quick "الإبلاغ عن هذا الريل"
   // (reason only, no link) — lands in the admin support center's
@@ -103,8 +120,15 @@ export default function ReelsScreen() {
 
   const { feedItems, sponsoredIdByPropertyId } = useMemo(() => {
     const byId = new Map((sponsorProperties ?? []).map((p) => [p.id, p]));
-    const introSponsor = filter.provinces.length === 0 ? sponsoredReels?.find((s) => s.placement === "intro") : undefined;
-    const inFeedSponsors = sponsoredReels?.filter((s) => s.placement === "in_feed") ?? [];
+    // ↔ الافتتاحي الأحدث أولًا (sponsoredReels مرتبة من الأحدث) وحسب الفئة المستهدفة وهدف الوصول (متحقق منهما فى useActiveSponsoredReels).
+    //   عند الفلترة بمحافظة/منطقة يظهر فقط الافتتاحي الواقع فيها؛ ولو عقاره خارج الفلتر لا يظهر. وبعد بلوغ هدف الوصول يخرج من القائمة
+    //   الممولة فيرجع إعلانًا عاديًا يظهر أثناء التصفح مع باقي الريلز.
+    const inFilter = (propertyId: string) => {
+      const p = byId.get(propertyId);
+      return !!p && matchesLocationFilter(p, filter.provinces, filter.regions);
+    };
+    const introSponsor = sponsoredReels?.find((s) => s.placement === "intro" && inFilter(s.propertyId));
+    const inFeedSponsors = sponsoredReels?.filter((s) => s.placement === "in_feed" && inFilter(s.propertyId)) ?? [];
 
     const sponsoredIdByPropertyId = new Map<string, string>();
     let items = [...filteredProperties];
@@ -129,7 +153,7 @@ export default function ReelsScreen() {
     });
 
     return { feedItems: items, sponsoredIdByPropertyId };
-  }, [filteredProperties, sponsorProperties, sponsoredReels, filter.provinces.length]);
+  }, [filteredProperties, sponsorProperties, sponsoredReels, filter.provinces, filter.regions]);
 
   // ↔ سرعة التنقل (الإصلاح الأهم): قبل كده handleOpenDetails/handleReelFinished
   // كانوا بيعتمدوا على activeIndex، وuseCompareSelection() بيرجّع object جديد
@@ -165,10 +189,29 @@ export default function ReelsScreen() {
   };
   const compareIdSet = useMemo(() => new Set(compareSelection.ids), [compareSelection.ids]);
 
+  // ↔ تغيير/إلغاء الفلتر: نرجع لأول ريل من القائمة الجديدة بدل ما نفضل على مكان قديم.
+  const filterKey = `${filter.provinces.join("|")}#${filter.regions.join("|")}`;
+  const firstFilterKeyRef = useRef(filterKey);
+  useEffect(() => {
+    if (firstFilterKeyRef.current === filterKey) return;
+    firstFilterKeyRef.current = filterKey;
+    activeIndexRef.current = 0;
+    setActiveIndex(0);
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [filterKey]);
+  const filterLabel = useMemo(() => {
+    const p = filter.provinces.length;
+    const r = filter.regions.length;
+    if (!p && !r) return "";
+    const base = p === 1 ? t(filter.provinces[0]) : p > 1 ? `${p} ${t("محافظات")}` : "";
+    const regionsPart = r ? `${r} ${t("منطقة")}` : "";
+    return [base, regionsPart].filter(Boolean).join(" · ");
+  }, [filter, t]);
+
   // ↔ تحميل مسبق لبوسترات/أول صور الريلز الجاية (كاش expo-image) — فلما
   // المستخدم يوصلها بتظهر فورًا من غير انتظار شبكة.
   useEffect(() => {
-    prefetchReelPosters(feedItems, activeIndex, PRELOAD_AHEAD + 3);
+    prefetchReelPosters(feedItems, activeIndex, PRELOAD_AHEAD + 5);
   }, [feedItems, activeIndex]);
 
   const reachedSponsorIds = useRef(new Set<string>());
@@ -309,7 +352,7 @@ export default function ReelsScreen() {
         // ↔ #3: لما لوحة التفاصيل فاتحة، بنقفل سحب الريلز (زي قفل التمرير
         // فى شاشة الريلز بيوتيوب لما تفتح الكومنتات) بدل ما نسيب المستخدم
         // يسحب لريل تانى واللوحة لسه فاتحة على ريل مختلف.
-        scrollEnabled={!detailsOpenId}
+        scrollEnabled={!detailsOpenId && !commentsLocked}
         showsVerticalScrollIndicator={false}
         getItemLayout={(_, index) => ({ length: reelHeight, offset: reelHeight * index, index })}
         onViewableItemsChanged={onViewableItemsChanged}
@@ -342,6 +385,10 @@ export default function ReelsScreen() {
         onOpenFilter={() => setFilterModalVisible(true)}
         onOpenNotifications={() => setNotifMenuVisible(true)}
         notifBadgeCount={notifications.totalUnread}
+        onOpenOffers={offersBar.onOpenOffers}
+        offersBadge={offersBar.offersBadge}
+        filterLabel={filterLabel}
+        onClearFilter={clearFilter}
       />
 
       <ReelFilterModal
@@ -372,11 +419,8 @@ export default function ReelsScreen() {
       <NotificationsDropdown
         visible={notifMenuVisible}
         onClose={() => setNotifMenuVisible(false)}
-        activeCat={notifications.activeCat}
-        onSwitchCat={notifications.setActiveCat}
         filter={notifications.filter}
         onSetFilter={notifications.setFilter}
-        badges={notifications.badges}
         items={notifications.visibleItems}
         onMarkAllRead={notifications.markAllRead}
         onItemPress={(index) => {
@@ -386,12 +430,7 @@ export default function ReelsScreen() {
           // ↔ handleNotifClick() — routes by action.type. `chat` has no
           // destination screen yet, so it's still a TODO; the other three
           // (reel/seller/property) all resolve to real screens now.
-          if (!item?.action) return;
-          const a = item.action;
-          if (a.type === "seller") router.push(`/seller/${a.id}`);
-          else if (a.type === "property") router.push(`/property/${a.id}`);
-          else if (a.type === "reel") router.push(`/property/${a.propertyId}`);
-          else if (a.type === "chat") router.push(`/chat/${a.id}`);
+          openNotificationItem(item);
         }}
       />
     </View>

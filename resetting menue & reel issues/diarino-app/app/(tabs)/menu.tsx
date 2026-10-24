@@ -1,4 +1,6 @@
+import { useOffersTopBar } from "../../lib/hooks/useOffersTopBar";
 import { useState } from "react";
+import { openNotificationItem } from "../../lib/notificationNavigation";
 import { router, Href } from "expo-router";
 import {
   View,
@@ -19,7 +21,7 @@ import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useFeatureFlag } from "../../lib/hooks/useFeatureFlags";
 import { waLink } from "../../lib/whatsapp";
 import { openExternalUrl } from "../../lib/linking";
-import { redirectGuestToLogin } from "../../lib/guestGate";
+import { promptGuestLogin } from "../../lib/guestGate";
 import { useActiveAdBanners } from "../../lib/hooks/useAdBanners";
 import { AdBannerCarousel } from "../../components/menu/AdBannerCarousel";
 import { MenuCard } from "../../components/menu/MenuCard";
@@ -107,6 +109,8 @@ export default function MenuScreen() {
   const { t } = useLanguage();
   const [notifMenuVisible, setNotifMenuVisible] = useState(false);
   const notifications = useNotifications();
+  // ↔ أيقونة «العروض» جنب جرس الإشعارات + نقطتها الحمراء (منفصلة عن الجرس).
+  const offersBar = useOffersTopBar();
   const { user } = useCurrentUser();
   const insets = useSafeAreaInsets();
   // ↔ عرض منطقة المحتوى الفعلى (مش عرض الشاشة — على الويب الصفحة ممكن تكون أضيق من النافذة):
@@ -131,7 +135,8 @@ export default function MenuScreen() {
     // ↔ انشر عقارك / اطلب عقارك للمسجَّلين فقط — الضيف يتحوّل لصفحة التسجيل
     // برسالة (lib/guestGate.ts). الحماية الأساسية كمان فى app/publish/_layout.tsx.
     if (item.actionType === "route" && /^\/publish(\/|$)/.test(item.actionValue) && user?.is_anonymous) {
-      void redirectGuestToLogin();
+      // ↔ نافذة «تسجيل الدخول / ليس الآن» — الضيف يفضل فى التصفّح ولا يتسجّل خروجه إلا بموافقته.
+      promptGuestLogin(item.actionValue.includes("create-request") ? "request" : item.actionValue.includes("create-listing") ? "listing" : "generic");
       return;
     }
     if (item.actionType === "route" && item.actionValue === "/live/broadcast" && user?.is_anonymous) {
@@ -163,6 +168,8 @@ export default function MenuScreen() {
         title={t("القائمة")}
         notifBadgeCount={notifications.totalUnread}
         onOpenNotifications={() => setNotifMenuVisible(true)}
+        onOpenOffers={offersBar.onOpenOffers}
+        offersBadge={offersBar.offersBadge}
       />
 
       {/* ↔ paddingBottom كبير عشان آخر كارت يقدر يتمرّر فوق شريط المهام العائم
@@ -176,7 +183,8 @@ export default function MenuScreen() {
             (الأدمن يقدر يعطّل الصورة الدائمة من لوحة التحكم) — شوف AdBannerCarousel. */}
         <AdBannerCarousel
           banners={adBanners ?? []}
-          onPlaceholderPress={() => openExternalUrl(waLink(t("مرحباً، أرغب في حجز مساحة إعلانية داخل تطبيق باراندا")))}
+          // ↔ بدل التحويل لواتساب: صفحة حجز المساحة الإعلانية (صورة + مدة 7/14/30 يومًا + سداد). الحصرى بواتساب من داخل الصفحة.
+          onPlaceholderPress={() => router.push("/ad-space" as Href)}
         />
 
         {/* عناصر القائمة الديناميكية */}
@@ -262,23 +270,15 @@ export default function MenuScreen() {
       <NotificationsDropdown
         visible={notifMenuVisible}
         onClose={() => setNotifMenuVisible(false)}
-        activeCat={notifications.activeCat}
-        onSwitchCat={notifications.setActiveCat}
         filter={notifications.filter}
         onSetFilter={notifications.setFilter}
-        badges={notifications.badges}
         items={notifications.visibleItems}
         onMarkAllRead={notifications.markAllRead}
         onItemPress={(index) => {
           const item = notifications.visibleItems[index];
           notifications.markItemRead(notifications.activeCat, index);
           setNotifMenuVisible(false);
-          if (!item?.action) return;
-          const a = item.action;
-          if (a.type === "seller") router.push(`/seller/${a.id}` as Href);
-          else if (a.type === "property") router.push(`/property/${a.id}` as Href);
-          else if (a.type === "reel") router.push(`/property/${a.propertyId}` as Href);
-          else if (a.type === "chat") router.push(`/chat/${a.id}` as Href);
+          openNotificationItem(item);
         }}
       />
     </>

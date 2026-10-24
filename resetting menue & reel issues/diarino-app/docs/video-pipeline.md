@@ -59,7 +59,7 @@ Upload manipulations → **Incoming transformation** (Edit):
 * Incoming transformation على `Diarino_uploads`: `c_limit,w_1280,h_1280,q_auto:good,vc_h264,f_mp4` (تم).
 * نتيجة القياس (فيديوهين فقط وقتها): متوسط 1.1MB، 1.0 Mbps، أطول ضلع 771px — يعني الرفعات
   السابقة كانت خفيفة أصلًا؛ العيّنة صغيرة، فأعد الاستعلام لما تتجمّع فيديوهات أكتر.
-* حد المدة: **180 ثانية** (`MAX_VIDEO_SEC` فى `app/publish/create-listing.tsx`).
+* حد المدة: **300 ثانية / ٥ دقائق** (`MAX_VIDEO_SEC` فى `app/publish/create-listing.tsx`).
 * حد الحجم: **600MB** قبل الرفع (`MAX_VIDEO_BYTES`) — اتعدّل من 100MB بقرار المنتج.
   ⚠ لازم سقف فيديو خطتك على Cloudinary يغطي الرقم ده (الخطة المجانية = 100MB)، وجرّب
   رفع فيديو ~150–300MB فعليًا: الرفع الحالي طلب POST واحد (`FormData`) بدون مهلة ولا

@@ -118,7 +118,7 @@ export default function PropertyDetailsScreen() {
       </ScrollView>
 
       {/* ↔ the fixed CTA bar fix — lives outside the ScrollView on purpose */}
-      <PropertyCtaBar property={property} safeBottom={insets.bottom} />
+      <PropertyCtaBar property={property} safeBottom={insets.bottom} showCommentsShortcut />
 
       <ReportModal
         visible={reportVisible}

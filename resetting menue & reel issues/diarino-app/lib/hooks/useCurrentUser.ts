@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { User } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
+import { withTimeout } from "../async";
 
 type AuthSnapshot = { user: User | null; loading: boolean };
 export type AuthStateListener = () => void;
@@ -40,13 +41,15 @@ function initializeAuthState() {
   if (initialized) return;
   initialized = true;
 
-  supabase.auth.getSession()
+  // ↔ إصلاح «شاشة تفضل تحميل/بيضاء عند فتح التطبيق»: getSession() ممكن يتأخر (قفل الجلسة/التخزين). لو ما رجعش خلال 8 ثوانٍ
+  // نعتبر مفيش مستخدم مؤقتًا (فتظهر شاشة الدخول) — وأى حدث دخول/استعادة جلسة لاحق بيحدّث الحالة تلقائيًا من onAuthStateChange.
+  withTimeout(supabase.auth.getSession(), 8000, "getSession")
     .then(({ data }) => {
       updateSnapshot(data.session?.user ?? null, false);
     })
     .catch((err: unknown) => {
       console.warn("Failed to fetch current user:", err);
-      updateSnapshot(null, false);
+      updateSnapshot(snapshot.user, false);
     });
 
   supabase.auth.onAuthStateChange((_event, session) => {

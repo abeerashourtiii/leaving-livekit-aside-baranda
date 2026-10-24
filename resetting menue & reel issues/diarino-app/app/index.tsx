@@ -8,9 +8,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Rect, Path } from "react-native-svg";
-import { completeOAuthCallback, signInWithGoogle, signInAsGuest } from "../lib/hooks/useAuth";
+import { completeOAuthCallback, signInWithGoogle, signInAsGuest, signOut, lookupIsAdmin } from "../lib/hooks/useAuth";
 import { getAuthSnapshot, subscribeAuthState, useCurrentUser } from "../lib/hooks/useCurrentUser";
-import { supabase } from "../lib/supabase";
 import { useThemeColors, ThemeColors } from "../lib/hooks/useThemeColors";
 import { useLanguage } from "../lib/hooks/useLanguage";
 import { GUEST_PUBLISH_NOTICE } from "../lib/guestGate";
@@ -46,6 +45,8 @@ export default function AuthGateScreen() {
   const [signingInGuest, setSigningInGuest] = useState(false);
   const [isCompletingOAuth, setIsCompletingOAuth] = useState(hasOAuthCallbackParams);
   const [error, setError] = useState<string | null>(null);
+  // ↔ لو التوجيه بعد الدخول اتأخر أكتر من 9 ثوانٍ نعرض أزرار «المتابعة / تسجيل الخروج» بدل شاشة فاضية بلا تفاصيل.
+  const [stuck, setStuck] = useState(false);
   // ↔ رسالة الضيف: لما ضيف يحاول ينشر عقار/يطلب عقار (lib/guestGate.ts) بيجي هنا
   // بـ ?notice=guest_publish ونعرض إن لازم تسجيل دخول.
   const { notice: noticeParam } = useLocalSearchParams<{ notice?: string }>();
@@ -113,23 +114,33 @@ export default function AuthGateScreen() {
 
     let mounted = true;
     async function routeAuthenticatedUser() {
-      if (!hasSession || skipped) {
-        if (mounted) router.replace("/(tabs)");
-        return;
+      // ↔ إصلاح «تعليق شاشة الدخول / شاشة بيضاء»: الاستعلام عن دور الأدمن كان بلا مهلة وبدون معالجة أخطاء، فأى تعليق/فشل فيه كان
+      // بيمنع التوجيه نهائيًا والمستخدم يفضل على شاشة فاضية (فيضطر يعيد الدخول). دلوقتي: الضيف يدخل فورًا، والمسجَّل بيتفحص دوره بمهلة
+      // وإعادة محاولة، وأى فشل = دخول عادى للتطبيق. وأى خطأ فى التنقل نفسه بيتجرّب تانى.
+      let target: "/admin" | "/(tabs)" = "/(tabs)";
+      if (hasSession && !skipped && currentUser?.id && !currentUser.is_anonymous) {
+        target = (await lookupIsAdmin(currentUser.id)) ? "/admin" : "/(tabs)";
       }
-
-      const { data: role } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", currentUser?.id ?? "")
-        .eq("role", "admin")
-        .maybeSingle();
-
-      if (mounted) router.replace(role?.role === "admin" ? "/admin" : "/(tabs)");
+      if (!mounted) return;
+      try {
+        router.replace(target);
+      } catch (navError) {
+        console.warn("[AuthGateScreen] navigation failed, retrying:", navError);
+        setTimeout(() => { if (mounted) { try { router.replace(target); } catch { /* آخر محاولة */ } } }, 400);
+      }
     }
 
     routeAuthenticatedUser();
     return () => { mounted = false; };
+  }, [loading, hasSession, skipped]);
+
+  useEffect(() => {
+    if (loading || !(hasSession || skipped)) {
+      setStuck(false);
+      return;
+    }
+    const timer = setTimeout(() => setStuck(true), 9000);
+    return () => clearTimeout(timer);
   }, [loading, hasSession, skipped]);
 
   async function handleGoogleSignIn() {
@@ -218,7 +229,23 @@ export default function AuthGateScreen() {
   }
 
   if (hasSession || skipped) {
-    return <View style={styles.loadingContainer} />;
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color="#22A652" size="large" />
+        <Text style={styles.stuckText}>{t("جاري تسجيل الدخول...")}</Text>
+        {stuck && (
+          <View style={styles.stuckBox}>
+            <Text style={styles.stuckHint}>{t("الأمر يستغرق وقتًا أطول من المعتاد. تحقق من الإنترنت أو تابع إلى التطبيق.")}</Text>
+            <Pressable style={styles.stuckBtn} onPress={() => router.replace("/(tabs)")}>
+              <Text style={styles.stuckBtnText}>{t("المتابعة إلى التطبيق")}</Text>
+            </Pressable>
+            <Pressable style={styles.stuckBtnGhost} onPress={() => { void signOut(); }}>
+              <Text style={styles.stuckBtnGhostText}>{t("تسجيل الخروج وإعادة المحاولة")}</Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
+    );
   }
 
   return (
@@ -343,7 +370,14 @@ function MailIcon() {
 
 function createStyles(themeColors: ThemeColors) {
   return StyleSheet.create({
-    loadingContainer: { flex: 1, backgroundColor: themeColors.isDark ? "#0F1B28" : "#EFEBE3", alignItems: "center", justifyContent: "center" },
+    loadingContainer: { flex: 1, backgroundColor: themeColors.isDark ? "#0F1B28" : "#EFEBE3", alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
+    stuckText: { marginTop: 14, fontSize: 13, fontWeight: "700", color: themeColors.isDark ? "#E5E7EB" : "#374151", textAlign: "center" },
+    stuckBox: { marginTop: 18, alignItems: "center", gap: 10, width: "100%", maxWidth: 360 },
+    stuckHint: { fontSize: 12, color: themeColors.isDark ? "#9CA3AF" : "#6B7280", textAlign: "center", lineHeight: 19 },
+    stuckBtn: { backgroundColor: "#22A652", borderRadius: 999, paddingVertical: 12, paddingHorizontal: 22, alignSelf: "stretch", alignItems: "center" },
+    stuckBtnText: { color: "white", fontSize: 13.5, fontWeight: "900" },
+    stuckBtnGhost: { borderRadius: 999, paddingVertical: 11, paddingHorizontal: 22, alignSelf: "stretch", alignItems: "center", borderWidth: 1, borderColor: themeColors.isDark ? "#374151" : "#D1D5DB" },
+    stuckBtnGhostText: { color: themeColors.isDark ? "#E5E7EB" : "#374151", fontSize: 13, fontWeight: "800" },
     // ↔ لون الخلفية = أعلى لون فى الجزء السفلي (#7A8F56) فأي فراغ جنب الصورة
     // على الشاشات القصيرة/الويب بيندمج معاه.
     container: { flex: 1, backgroundColor: "#7A8F56" },

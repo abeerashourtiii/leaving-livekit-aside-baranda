@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, TextInput, FlatList, Alert } from "r
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../../lib/supabase";
 import { AdminSection } from "../../lib/hooks/useIsAdmin";
+import { setAdminRole, adminRoleErrorMessage } from "../../lib/adminRoles";
 import { logAndGetSafeMessage } from "../../lib/errors";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 
@@ -24,6 +25,10 @@ const SECTIONS: { key: AdminSection; label: string }[] = [
   { key: "auditLog", label: "سجل تدقيق الأدمن" },
   { key: "userActivity", label: "سجل نشاط المستخدمين" },
   { key: "menuItems", label: "أيقونات صفحة القائمة" },
+  { key: "music", label: "المكتبة الموسيقية" },
+  { key: "deals", label: "الصفقات والرسوم" },
+  { key: "offers", label: "العروض المقدمة" },
+  { key: "requests", label: "إدارة الطلبات" },
 ];
 
 type AdminRow = {
@@ -54,29 +59,23 @@ export function AdminManagement() {
   const grantMutation = useMutation({
     mutationFn: async () => {
       if (!selectedUser) return;
-      const { error } = await supabase.from("user_roles").insert({
-        user_id: selectedUser.id, role: "admin",
-        full_access: grantFullAccess,
-        permissions: grantFullAccess ? [] : Array.from(grantSections),
-      });
-      if (error) throw error;
+      await setAdminRole({ userId: selectedUser.id, makeAdmin: true, fullAccess: grantFullAccess, permissions: grantFullAccess ? [] : Array.from(grantSections) });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminList"] });
       setSelectedUser(null); setSearch(""); setSearchResults([]); setGrantSections(new Set()); setGrantFullAccess(true);
     },
     onError: (err: unknown) =>
-      Alert.alert("تعذر منح الصلاحية", logAndGetSafeMessage("grantMutation failed", err, "برجاء المحاولة مرة أخرى.")),
+      Alert.alert("تعذر منح الصلاحية", adminRoleErrorMessage(err, logAndGetSafeMessage("grantMutation failed", err, "برجاء المحاولة مرة أخرى."))),
   });
 
   const revokeMutation = useMutation({
     mutationFn: async (userId: string) => {
-      const { error } = await supabase.from("user_roles").delete().eq("user_id", userId).eq("role", "admin");
-      if (error) throw error;
+      await setAdminRole({ userId, makeAdmin: false });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["adminList"] }),
     onError: (err: unknown) =>
-      Alert.alert("لا يمكن إزالة هذا المشرف", logAndGetSafeMessage("revokeMutation failed", err, "برجاء المحاولة مرة أخرى.")),
+      Alert.alert("لا يمكن إزالة هذا المشرف", adminRoleErrorMessage(err, logAndGetSafeMessage("revokeMutation failed", err, "برجاء المحاولة مرة أخرى."))),
   });
 
   async function runSearch(q: string) {

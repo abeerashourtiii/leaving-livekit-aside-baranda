@@ -14,7 +14,7 @@ type PropertyRowBase = {
   negotiable: boolean | null; finish_type: string | null; status: string | null; delivery_date: string | null;
   features: string[]; description: string; media: MediaItem[]; cover_image: string | null; music: string | null;
   captions_ar: string | null; captions_en: string | null;
-  pinned: boolean; pinned_at: string | null; moderation_status?: string | null; likes: number; saves: number; views: number; chats: number;
+  pinned: boolean; pinned_at: string | null; moderation_status?: string | null; moderation_reason?: string | null; published_at?: string | null; closed_type?: string | null; comment_count?: number | null; likes: number; saves: number; views: number; chats: number;
   created_at: string; share_platforms: string[] | null;
 };
 type PropertyRow = PropertyRowBase & { profiles: ProfileRowPublic | null };
@@ -55,8 +55,11 @@ function rowToProperty(row: PropertyRow): Property {
     pinned: row.pinned,
     pinnedAt: row.pinned_at ? new Date(row.pinned_at).getTime() : undefined,
     moderationStatus: (row.moderation_status as Property["moderationStatus"]) ?? undefined,
+    moderationReason: row.moderation_reason ?? undefined,
+    publishedAt: row.published_at ? new Date(row.published_at).getTime() : undefined,
+    closedType: row.closed_type === "sold" || row.closed_type === "rented" ? row.closed_type : undefined,
     sharePlatforms: row.share_platforms || [],
-    likes: row.likes, saves: row.saves, views: row.views, chats: row.chats,
+    likes: row.likes, saves: row.saves, views: row.views, chats: row.chats, comments: row.comment_count ?? 0,
     createdAt: new Date(row.created_at).getTime(),
     seller: {
       id: row.seller_id,
@@ -90,7 +93,8 @@ const SELECT = "*, profiles_public!seller_id(id, full_name, avatar_url, verified
 const SELECT_DETAIL = "*, profiles_public!seller_id(id, full_name, avatar_url, verified)";
 
 async function fetchProperties(): Promise<Property[]> {
-  const { data, error } = await supabase.from("properties").select(SELECT).order("created_at", { ascending: false }).limit(300);
+  // ↔ الإعلان المُغلق بصفقة (تم البيع / تم الإيجار) لا يظهر فى الريلز: يبقى فقط فى إدارة الحساب وصفحة المعلن.
+  const { data, error } = await supabase.from("properties").select(SELECT).is("closed_at", null).order("created_at", { ascending: false }).limit(300);
   if (error) throw error;
   return (data as unknown as PropertyRow[]).map(rowToProperty);
 }
@@ -124,7 +128,8 @@ export type PropertyPageFilters = {
 };
 
 async function fetchPropertiesPage(filters: PropertyPageFilters, pageParam: number): Promise<Property[]> {
-  let q = supabase.from("properties").select(SELECT).order("created_at", { ascending: false });
+  // ↔ البحث لا يُرجع الإعلانات المُغلقة بصفقة (تم البيع / تم الإيجار).
+  let q = supabase.from("properties").select(SELECT).is("closed_at", null).order("created_at", { ascending: false });
 
   if (filters.purpose && filters.purpose !== "all") q = q.eq("purpose", filters.purpose);
   if (filters.type && filters.type !== "all") q = q.eq("type", filters.type);
@@ -324,8 +329,10 @@ export function useMyProperties(sellerId: string | undefined) {
   });
 }
 
-export type CreatePropertyInput = Omit<Property, "id" | "createdAt" | "likes" | "saves" | "views" | "chats" | "seller" | "pinned" | "pinnedAt"> & {
+export type CreatePropertyInput = Omit<Property, "id" | "createdAt" | "likes" | "saves" | "views" | "chats" | "seller" | "pinned" | "pinnedAt" | "closedType" | "comments"> & {
   sellerId: string;
+  // ↔ وقت إقرار ملكية حقوق الوسائط عند النشر (properties.rights_declared_at).
+  rightsDeclaredAt?: string;
 };
 
 export function useCreateProperty() {
@@ -361,6 +368,9 @@ export function useCreateProperty() {
         cover_image: input.coverImage,
         music: input.music,
         share_platforms: input.sharePlatforms || [],
+        // ↔ حالة الإعلان الجديد (pending/approved) بيحددها الخادم (trigger فى 20261019000000_reel_approval.sql) حسب مفتاح
+        //   «اشتراط موافقة الأدمن قبل النشر»: العميل ما بيقدرش يبعت approved لنفسه. لو الـ migration لسه ما اتطبقتش الافتراضى approved.
+        rights_declared_at: input.rightsDeclaredAt ?? null,
       };
       // ↔ payload معرّف فوق بنوع Insert بالظبط، فمفيش داعي لـ as any هنا.
       const { data, error } = await supabase.from("properties").insert(payload).select().single();
@@ -416,10 +426,14 @@ export function useUpdateProperty() {
       if (patch.coverImage !== undefined) row.cover_image = patch.coverImage;
       if (patch.music !== undefined) row.music = patch.music;
       if (patch.sharePlatforms !== undefined) row.share_platforms = patch.sharePlatforms;
+      // ↔ إقرار ملكية الحقوق عند تعديل الإعلان (بيتجدّد مع كل تعديل).
+      if (patch.rightsDeclaredAt !== undefined) row.rights_declared_at = patch.rightsDeclaredAt;
       row.updated_at = new Date().toISOString();
 
-      const { error } = await supabase.from("properties").update(row).eq("id", id);
+      const { data, error } = await supabase.from("properties").update(row).eq("id", id).select("moderation_status").maybeSingle();
       if (error) throw error;
+      // بيرجّع حالة المراجعة بعد التعديل (تعديل المحتوى ممكن يعيد الإعلان «قيد المراجعة»).
+      return { moderationStatus: (data?.moderation_status ?? null) as string | null };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["properties"] }),
   });

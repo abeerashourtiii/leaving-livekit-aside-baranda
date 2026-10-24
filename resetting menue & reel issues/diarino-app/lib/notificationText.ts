@@ -9,6 +9,10 @@ const PREFIXES: [string, string][] = [
   ["انخفض سعر عقار محفوظ لديك: ", "Price dropped on a property you saved: "],
   ["رسالة جديدة من ", "New message from "],
   ["رسالة جديدة: ", "New message: "],
+  // ↔ قرارات الأدمن على الإعلان (20261019000000_reel_approval.sql)
+  ["تمت الموافقة على إعلانك ونُشر للجميع: ", "Your listing was approved and is now live: "],
+  ["تم رفض إعلانك: ", "Your listing was rejected: "],
+  ["تم حذف إعلانك: ", "Your listing was removed: "],
 ];
 const EXACT: Record<string, string> = {
   "أصبح لديك متابع جديد": "You have a new follower",

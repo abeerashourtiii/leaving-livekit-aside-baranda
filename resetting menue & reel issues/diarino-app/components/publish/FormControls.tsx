@@ -1,4 +1,7 @@
+import { useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet, TextInputProps } from "react-native";
+import Svg, { Path, Circle } from "react-native-svg";
+import { physicalSide } from "../../lib/rtl";
 import { ChipLabel } from "../shared/ChipLabel";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
@@ -36,6 +39,44 @@ export function FormInput(props: TextInputProps & { error?: boolean }) {
       placeholder={placeholder ? t(placeholder) : placeholder}
       {...rest}
     />
+  );
+}
+
+// ↔ حقل كلمة المرور مع زر العين لإظهار/إخفاء الكلمة (بيتستخدم فى كل شاشات كلمة المرور: تسجيل الدخول، إنشاء الحساب،
+// تعيين كلمة مرور جديدة). الزر فى نهاية الحقل (يسار فى العربية / يمين فى الإنجليزية) على أندرويد/آيفون/الويب/APK،
+// والحقل بياخد حشو فى الجهة دى عشان النص ما يدخلش تحت الأيقونة.
+export function PasswordInput(props: Omit<TextInputProps, "secureTextEntry"> & { error?: boolean }) {
+  const { t, language } = useLanguage();
+  const themeColors = useThemeColors();
+  const [visible, setVisible] = useState(false);
+  const eyeLeft = language === "ar";
+  const sideProp = physicalSide(eyeLeft);
+  const padProp = sideProp === "left" ? "paddingLeft" : "paddingRight";
+  const color = themeColors.textMuted;
+  const { style, ...rest } = props;
+  return (
+    <View style={{ position: "relative", justifyContent: "center" }}>
+      <FormInput
+        {...rest}
+        secureTextEntry={!visible}
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={[{ [padProp]: 46 }, style]}
+      />
+      <Pressable
+        onPress={() => setVisible((v) => !v)}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel={visible ? t("إخفاء كلمة المرور") : t("إظهار كلمة المرور")}
+        style={{ position: "absolute", [sideProp]: 8, top: 0, bottom: 0, width: 36, alignItems: "center", justifyContent: "center" }}
+      >
+        <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <Path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+          <Circle cx={12} cy={12} r={3} />
+          {!visible && <Path d="M3 3l18 18" />}
+        </Svg>
+      </Pressable>
+    </View>
   );
 }
 

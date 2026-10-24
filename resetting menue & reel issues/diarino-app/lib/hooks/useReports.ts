@@ -8,7 +8,7 @@ import { useCurrentUser } from "./useCurrentUser";
 // existed since 20260802000000_notifications_backend.sql. 'request'
 // added in 20260815000000_support_center.sql alongside the admin support
 // center that groups all of these under "الدعم".
-export type ReportTargetType = "property" | "live" | "request";
+export type ReportTargetType = "property" | "live" | "request" | "comment";
 
 export function useSubmitReport() {
   const { user } = useCurrentUser();

@@ -19,6 +19,9 @@ import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 import { openExternalUrl } from "../../lib/linking";
 import { phoneToWaMeDigits } from "../../lib/phone";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useOffersMeta, useRespondToOffer, OFFER_STATUS_LABELS } from "../../lib/hooks/useOffersHub";
+import { ConfirmModal } from "../../components/shared/ConfirmModal";
+import { showToast } from "../../components/shared/Toast";
 
 const MAX_IMAGES = 10; // ↔ maxImages in handleChatImageUpload()
 
@@ -35,6 +38,12 @@ export default function ChatScreen() {
   const { data: messages = [] } = useChatMessages(id, user?.id);
   const sendMessage = useSendMessage();
   const markRead = useMarkChatRead();
+
+  // ↔ بيانات العرض المرتبط بالمحادثة (ريل أو طلب): السعر والحالة، وللمستلم قبول/اعتذار (الخادم بيتحقق إنك الطرف المستلم).
+  const offersMeta = useOffersMeta(user?.id);
+  const meta = id ? offersMeta.data?.get(id) : undefined;
+  const respond = useRespondToOffer();
+  const [pendingRespond, setPendingRespond] = useState<"accepted" | "declined" | null>(null);
 
   const [draft, setDraft] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
@@ -137,7 +146,40 @@ export default function ChatScreen() {
         keyExtractor={(_, i) => `${id}-${i}`}
         contentContainerStyle={{ padding: 12, gap: 8 }}
         ListHeaderComponent={
-          property ? (
+          <>
+          {meta && (
+            <View style={styles.offerCard}>
+              <View style={styles.offerTop}>
+                <Text style={styles.offerKind}>{meta.kind === "request" ? t("عرض على طلب") : t("عرض على إعلان")}</Text>
+                <View style={[styles.offerStatus, { backgroundColor: meta.status === "accepted" ? "#15803D" : meta.status === "declined" ? "#6B7280" : "#D97706" }]}>
+                  <Text style={styles.offerStatusText}>{t(OFFER_STATUS_LABELS[meta.status])}</Text>
+                </View>
+              </View>
+              {(meta.kind === "request" ? chatSummary.requestTitle : chatSummary.propertyTitle) ? (
+                <Text style={styles.offerTitle} numberOfLines={2}>{meta.kind === "request" ? chatSummary.requestTitle : chatSummary.propertyTitle}</Text>
+              ) : null}
+              <Text style={styles.offerPrice}>
+                {meta.price != null ? `${t("السعر المقترح")}: ${fmtPrice(meta.price)} ${t("ج.م")}` : t("لم يحدد سعرًا")}
+              </Text>
+              {meta.role === "recipient" && meta.status === "new" && (
+                <View style={styles.offerActions}>
+                  <Pressable style={[styles.offerBtn, { backgroundColor: "#22A652" }]} onPress={() => setPendingRespond("accepted")}>
+                    <Text style={styles.offerBtnText}>{t("قبول")}</Text>
+                  </Pressable>
+                  <Pressable style={[styles.offerBtn, { backgroundColor: "#6B7280" }]} onPress={() => setPendingRespond("declined")}>
+                    <Text style={styles.offerBtnText}>{t("اعتذار")}</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          )}
+          {!meta && !property && chatSummary.requestTitle ? (
+            <View style={styles.offerCard}>
+              <Text style={styles.offerKind}>{t("طلب")}</Text>
+              <Text style={styles.offerTitle} numberOfLines={2}>{chatSummary.requestTitle}</Text>
+            </View>
+          ) : null}
+          {property ? (
             <Pressable style={styles.propertyCard} onPress={() => router.push(`/property/${property.id}`)}>
               <View style={styles.propertyCover}><ReelBackground index={0} type={property.type} /></View>
               <View style={{ padding: 10 }}>
@@ -147,7 +189,8 @@ export default function ChatScreen() {
                 </Text>
               </View>
             </Pressable>
-          ) : null
+          ) : null}
+          </>
         }
         renderItem={({ item }) => (
           <View style={[styles.bubble, item.from === "me" ? styles.bubbleSent : styles.bubbleReceived]}>
@@ -209,6 +252,28 @@ export default function ChatScreen() {
           )}
         </Pressable>
       </View>
+
+      <ConfirmModal
+        visible={!!pendingRespond}
+        title={pendingRespond === "accepted" ? t("قبول العرض") : t("الاعتذار عن العرض")}
+        text={
+          pendingRespond === "accepted"
+            ? t("ستصل مقدّم العرض رسالة بقبول عرضه في هذه المحادثة. تواصل معه لإتمام الصفقة. تذكّر أن رسم التطبيق يُستحق عند إتمام الصفقة.")
+            : t("ستصل مقدّم العرض رسالة بالاعتذار في هذه المحادثة. هل تريد المتابعة؟")
+        }
+        confirmLabel={pendingRespond === "accepted" ? t("قبول") : t("اعتذار")}
+        danger={pendingRespond === "declined"}
+        onConfirm={() => {
+          const status = pendingRespond;
+          setPendingRespond(null);
+          if (!status || !meta) return;
+          respond.mutate({ kind: meta.kind, offerId: meta.offerId, status }, {
+            onSuccess: () => showToast(status === "accepted" ? t("تم قبول العرض") : t("تم الاعتذار عن العرض")),
+            onError: () => showToast(t("تعذر تنفيذ العملية، حاول مرة أخرى")),
+          });
+        }}
+        onCancel={() => setPendingRespond(null)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -226,6 +291,16 @@ function createStyles(themeColors: ThemeColors) {
     },
     headerBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
     headerName: { color: "white", fontWeight: "900", fontSize: 13.5 },
+    offerCard: { backgroundColor: themeColors.card, borderRadius: 12, padding: 12, marginBottom: 6, gap: 4, borderWidth: 1, borderColor: themeColors.border },
+    offerTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+    offerKind: { fontSize: 12, fontWeight: "900", color: "#22A652" },
+    offerStatus: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3 },
+    offerStatusText: { color: "white", fontSize: 10.5, fontWeight: "900" },
+    offerTitle: { fontSize: 12.5, fontWeight: "800", color: themeColors.text, lineHeight: 19 },
+    offerPrice: { fontSize: 12.5, fontWeight: "900", color: "#22A652" },
+    offerActions: { flexDirection: "row", gap: 8, marginTop: 6 },
+    offerBtn: { borderRadius: 999, paddingHorizontal: 20, paddingVertical: 9 },
+    offerBtnText: { color: "white", fontSize: 12, fontWeight: "900" },
     propertyCard: { backgroundColor: themeColors.card, borderRadius: 12, overflow: "hidden", marginBottom: 6 },
     propertyCover: { height: 90 },
     propertyTitle: { fontSize: 12, fontWeight: "900", color: themeColors.text },

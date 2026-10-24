@@ -32,6 +32,12 @@ npx expo run:android   # or: npx expo run:ios
 - **production** — `nwbtzchtwyhqktoerbap` ("diarino production", used by the
   `production` profile)
 
+> **الإعداد المطلوب لبروفايلات التطوير:** فى `eas.json` بروفايلا `development` و`preview` يشيران الآن لمشروع التطوير
+> (`https://nlvrmmwujnwifwedhagy.supabase.co`) لكن مفتاح anon فيهما `PASTE_DEV_PROJECT_ANON_KEY_HERE`:
+> افتح Supabase Dashboard لمشروع التطوير ← Project Settings ← API وانسخ مفتاح `anon` وضعه مكانه. التطبيق يرفض الإقلاع بمفتاح
+> placeholder (حماية فى `lib/supabase.ts`) كى لا يُبنى APK تجريبى على قاعدة الإنتاج بالخطأ. `production` يبقى كما هو.
+> لا ترفع ملف `.env` على مستودع (مُستثنى فى `.gitignore`)؛ استخدم `.env.example`.
+
 Both need every migration in `supabase/migrations/` applied and every Edge
 Function deployed — they're two independent databases, so a migration run
 against one never reaches the other. The commands below target whichever
