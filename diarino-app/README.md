@@ -18,9 +18,10 @@ Start the web app with `npm run start -- --web`, or create its static web
 build with `npm run build:web`. For native development, use `npm run android`
 or `npm run ios` after configuring `.env`. To create an Android APK, use
 `eas build --platform android --profile preview`; for an iOS app build, use
-`eas build --platform ios --profile production`. Configure the matching
-Supabase credentials in the selected EAS profile or EAS environment before
-building. If credentials are missing or placeholders, the app shows setup
+`eas build --platform ios --profile production`. For cloud EAS builds, set
+the matching Supabase URL and anon/publishable key in the EAS environment for
+the selected profile; the git-ignored local `.env` is not included in cloud
+builds. If credentials are missing or invalid, the app shows setup
 instructions instead of mounting screens that require Supabase.
 
 This project uses native modules (LiveKit, react-native-maps, camera) that
@@ -41,11 +42,12 @@ npx expo run:android   # or: npx expo run:ios
 - **production** — `nwbtzchtwyhqktoerbap` ("diarino production", used by the
   `production` profile)
 
-> **الإعداد المطلوب لبروفايلات التطوير:** فى `eas.json` بروفايلا `development` و`preview` يشيران الآن لمشروع التطوير
-> (`https://nlvrmmwujnwifwedhagy.supabase.co`) لكن مفتاح anon فيهما `PASTE_DEV_PROJECT_ANON_KEY_HERE`:
-> افتح Supabase Dashboard لمشروع التطوير ← Project Settings ← API وانسخ مفتاح `anon` وضعه مكانه. التطبيق يرفض الإقلاع بمفتاح
-> placeholder (حماية فى `lib/supabase.ts`) كى لا يُبنى APK تجريبى على قاعدة الإنتاج بالخطأ. `production` يبقى كما هو.
-> لا ترفع ملف `.env` على مستودع (مُستثنى فى `.gitignore`)؛ استخدم `.env.example`.
+> **إعداد بروفايلات التطوير:** أضف `EXPO_PUBLIC_SUPABASE_URL` و
+> `EXPO_PUBLIC_SUPABASE_ANON_KEY` (أو `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`)
+> إلى بيئتَي EAS `development` و`preview` من لوحة EAS، باستخدام قيم مشروع
+> التطوير (`nlvrmmwujnwifwedhagy`)، واجعل المفتاح متغيرًا حساسًا. ملف `.env`
+> المحلي مستثنى من الرفع. بروفايل `production` يظل مرتبطًا بمشروع الإنتاج.
+> التطبيق يرفض إعدادات placeholder بدلًا من الاتصال بمشروع غير مقصود.
 
 Both need every migration in `supabase/migrations/` applied and every Edge
 Function deployed — they're two independent databases, so a migration run

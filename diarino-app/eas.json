@@ -13,8 +13,6 @@
         "image": "ubuntu-22.04-jdk-17-ndk-r26b"
       },
       "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "https://nlvrmmwujnwifwedhagy.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "PASTE_DEV_PROJECT_ANON_KEY_HERE",
         "EXPO_PUBLIC_LIVEKIT_URL": "wss://diarino-production-iqeeipqt.livekit.cloud",
         "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "ufz5snhv",
         "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "diarino_uploads"
@@ -28,8 +26,6 @@
         "image": "ubuntu-22.04-jdk-17-ndk-r26b"
       },
       "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "https://nlvrmmwujnwifwedhagy.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "PASTE_DEV_PROJECT_ANON_KEY_HERE",
         "EXPO_PUBLIC_LIVEKIT_URL": "wss://diarino-production-iqeeipqt.livekit.cloud",
         "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "ufz5snhv",
         "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "diarino_uploads"

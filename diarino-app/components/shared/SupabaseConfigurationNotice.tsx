@@ -25,9 +25,10 @@ export function SupabaseConfigurationNotice({
         {message}
       </Text>
       <Text style={styles.instructions}>
-        انسخ .env.example إلى .env داخل مجلد التطبيق، وأضف رابط مشروع Supabase
-        ومفتاح anon أو publishable الصحيحين، ثم أعد تشغيل التطبيق أو البناء.
-        راجع قسم Supabase setup في README.
+        للتشغيل المحلي: انسخ .env.example إلى .env وأضف رابط مشروع Supabase
+        ومفتاح anon أو publishable الصحيحين. أما بناء EAS السحابي فلا يقرأ ملف
+        .env المحلي؛ أضف القيم نفسها إلى بيئة EAS المناسبة للبروفايل ثم أعد
+        البناء. راجع قسم Supabase setup في README.
       </Text>
     </View>
   );
