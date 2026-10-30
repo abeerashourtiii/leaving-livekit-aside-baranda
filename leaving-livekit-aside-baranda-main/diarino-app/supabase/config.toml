@@ -1,0 +1,15 @@
+project_id = "hgwwmdhndczfqwdulird"
+# LiveKit calls this directly (server-to-server), authenticated by its own
+# signed-webhook scheme — not a Supabase user JWT — so JWT verification
+# must be off for this function specifically. All other functions keep the
+# default (JWT-verified).
+[functions.livekit-webhook]
+verify_jwt = false
+
+# ↔ سياسة كلمة المرور القوية (إصدار السياسات 18): 8 أحرف على الأقل + أحرف صغيرة وكبيرة + أرقام.
+# هذا الملف يضبط بيئة supabase المحلية/`supabase config push`. على المشروع المستضاف: Supabase Dashboard ← Authentication
+# ← Sign In / Providers ← Email ← Minimum password length = 8 و Password Requirements = "Lowercase, uppercase letters and digits".
+# التطبيق نفسه يفرض نفس الشروط قبل الإرسال (lib/password.ts)، فالإعداد هنا حماية إضافية من جهة الخادم.
+[auth]
+minimum_password_length = 8
+password_requirements = "lower_upper_letters_digits"
