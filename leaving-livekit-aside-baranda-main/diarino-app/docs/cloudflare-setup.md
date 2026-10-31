@@ -20,10 +20,10 @@ Cloudflare Dashboard ← **Workers & Pages** ← **Create** ← **Pages** ← **
 ```bash
 cd diarino-app
 # متغيرات البيئة (مرة): نفس قيم eas.json ← build.production.env (EXPO_PUBLIC_SUPABASE_URL ...)
-npm run build:web                 # يولّد dist/ (ويضيف _headers و .well-known تلقائيًا من public/)
-rm -rf ../docs/* ../docs/.well-known && cp -r dist/. ../docs/
+npm run build:web                 # يولّد dist/ ويتحقق من ملف JS المشار إليه ثم يزامن كامل الناتج إلى ../docs/
 git add -A && git commit -m "web build" && git push   # Cloudflare ينشر تلقائيًا
 ```
+لا تنسخ `index.html` أو ملفات `_expo` منفردة؛ يجب أن تُنشر الصفحة والحزمة ذات الاسم ذي البصمة معًا. يتوقف أمر البناء برسالة خطأ إذا كان ملف JS المشار إليه مفقودًا، ثم يتحقق من وجوده في `docs/` بعد المزامنة.
 ### الخيار ب (Cloudflare يبنى بنفسه)
 | الحقل | القيمة |
 |---|---|
