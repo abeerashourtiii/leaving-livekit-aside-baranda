@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, memo, useMemo } from "react";
+import { useIsFocused } from "@react-navigation/native";
+import { usePiPActive } from "../../lib/pipState";
 import { recordPropertyView } from "../../lib/hooks/usePropertyViews";
 import { View, Text, Pressable, StyleSheet, Animated, Easing, ScrollView, BackHandler, PanResponder, PanResponderGestureState } from "react-native";
 import { Image } from "expo-image";
@@ -119,6 +121,19 @@ export const ReelCard = memo(function ReelCard({
   //   (حتى لو كان المستخدم موقفه قبل كده). holdPaused = الإيقاف الفعلي (يدوي أو أثناء السحب).
   const [scrubbing, setScrubbing] = useState(false);
   const holdPaused = paused || scrubbing;
+
+  // ↔ استئناف تلقائى عند الرجوع: لو المستخدم وقّف الريل (باللمس) ثم انتقل لريل تانى (قبله أو بعده) ورجع له، الريل يكمّل من نفس النقطة
+  // من غير ما يضغط على الشاشة. بنصفّر الإيقاف اليدوى لحظة ما الريل يخرج من كونه النشط *وهو الشاشة لسه فى التركيز* (يعنى بسبب التنقل
+  // بين الريلز)؛ لو خرج لأن صفحة تانية اتفتحت فوقه (المعلن، التعليقات...) نسيب الإيقاف زى ما هو.
+  const screenFocused = useIsFocused();
+  const wasActiveRef = useRef(isActive);
+  useEffect(() => {
+    if (wasActiveRef.current && !isActive && screenFocused) {
+      setPaused(false);
+      setScrubbing(false);
+    }
+    wasActiveRef.current = isActive;
+  }, [isActive, screenFocused]);
   // ↔ إصلاح باغ #2: حالة الأيقونة اللي بتفلاش عند كل تبديل (تشغيل/إيقاف)
   // — مستقلة عن `paused` نفسها، عشان تفضل تظهر لحظة الضغط حتى لو
   // `paused` اتغيّرت فورًا بعدها.
@@ -194,6 +209,8 @@ export const ReelCard = memo(function ReelCard({
     return () => clearTimeout(t);
   }, [isActive, property.id]);
 
+  // ↔ فى وضع الصورة العائمة (PiP) بيتعرض الريل بس: بنخفى معلومات الإعلان والأزرار وشريط التقدم وأزرار الإجراءات.
+  const pipUi = usePiPActive();
   const [playerMounted, setPlayerMounted] = useState(false);
   useEffect(() => {
     if (!isNearActive) { setPlayerMounted(false); return; }
@@ -560,7 +577,7 @@ export const ReelCard = memo(function ReelCard({
 
         {/* ↔ .reel-pause-indicator — إصلاح باغ #2: فلاش قصير عند كل تبديل
             (تشغيل أو إيقاف) بدل ما تفضل أيقونة الإيقاف ظاهرة باستمرار. */}
-        {tapFeedback && !detailsMounted && (
+        {tapFeedback && !detailsMounted && !pipUi && (
           <Animated.View style={[styles.pauseIndicator, { opacity: tapFeedbackOpacity }]} pointerEvents="none">
             <Svg width={40} height={40} viewBox="0 0 24 24" fill="white">
               {tapFeedback === "pause" ? <Path d="M6 4h4v16H6zM14 4h4v16h-4z" /> : <Path d="M8 5v14l11-7z" />}
@@ -569,7 +586,7 @@ export const ReelCard = memo(function ReelCard({
         )}
 
         {/* ↔ .long-press-indicator */}
-        {speed === 2 && !detailsMounted && (
+        {speed === 2 && !detailsMounted && !pipUi && (
           <View style={styles.longPressIndicator} pointerEvents="none">
             <Text style={styles.longPressText}>⚡ 2X</Text>
           </View>
@@ -586,6 +603,7 @@ export const ReelCard = memo(function ReelCard({
           />
         )}
 
+        {!pipUi && (
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: mediaOverlayOpacity }]} pointerEvents={detailsMounted ? "none" : "box-none"}>
           <ReelInfoOverlay
             property={property}
@@ -635,6 +653,7 @@ export const ReelCard = memo(function ReelCard({
             onToggleCompare={() => onToggleCompare(property.id)}
           />
         </Animated.View>
+        )}
 
         {/* ↔ mini-player: الضغط على الريل المصغّر يرجّعه كامل الشاشة تاني
             (زي الضغط على الـ mini-player بتاع يوتيوب شورتس عشان يتكبّر) */}

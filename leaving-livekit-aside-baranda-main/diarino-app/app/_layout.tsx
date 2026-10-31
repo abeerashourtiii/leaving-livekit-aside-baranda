@@ -17,6 +17,7 @@ import * as Linking from "expo-linking";
 import { AppState, Platform } from "react-native";
 import { usePathname, useGlobalSearchParams, useSegments } from "expo-router";
 import { saveResumeRoute, peekResumeRoute } from "../lib/sessionRestore";
+import { OpenInAppBanner } from "../components/shared/OpenInAppBanner";
 import { getAuthSnapshot, subscribeAuthState } from "../lib/hooks/useCurrentUser";
 import { applyPersistedRTLAtStartup } from "../lib/hooks/useLanguage";
 import { usePushNotifications } from "../lib/hooks/usePushNotifications";
@@ -254,6 +255,8 @@ function ConfiguredRootLayout() {
                 settings.tsx. */}
             <ToastHost />
             <GuestLoginPromptHost />
+            {/* ↔ نسخة الويب فقط: «هل تريد المتابعة من خلال التطبيق؟» لروابط المشاركة على متصفح الموبايل (OpenInAppBanner.web.tsx) */}
+            <OpenInAppBanner />
           </QueryClientProvider>
         </SafeAreaProvider>
         {showLaunch && <LaunchVideoSplash onDone={() => setShowLaunch(false)} />}

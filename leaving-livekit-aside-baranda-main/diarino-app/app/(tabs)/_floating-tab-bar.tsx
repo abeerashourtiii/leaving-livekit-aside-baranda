@@ -4,6 +4,7 @@ import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { RequestsIcon, MenuIcon as GridIcon, ReelsIcon, SearchSparkleIcon } from "./_tab-icons";
 import { useThemeColors } from "../../lib/hooks/useThemeColors";
 import { useLanguage } from "../../lib/hooks/useLanguage";
+import { usePiPActive } from "../../lib/pipState";
 
 // ↔ شريط المهام السفلي — التصميم المرجعي:
 //   * كبسولة داكنة (pill) فيها 3 أيقونات: رئيسية / قائمة / طلبات.
@@ -55,6 +56,10 @@ export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
       navigation.navigate(route.name);
     }
   }
+
+  // ↔ PiP: شريط التبويب مايظهرش فى النافذة العائمة (الريل لوحده).
+  const pip = usePiPActive();
+  if (pip) return null;
 
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: insets.bottom + 14 }]}>

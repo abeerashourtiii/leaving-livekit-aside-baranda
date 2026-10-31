@@ -191,7 +191,23 @@ export function useNotifications() {
       const { error } = await supabase.rpc("mark_notifications_read", { p_categories: dbCategories });
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey }),
+    // ↔ «تحديد الكل كمقروء»: العلامات (النقطة الملوّنة + عدّاد الجرس) بتختفى فورًا (تحديث متفائل)، وبعدها إعادة الجلب بتأكّد من
+    // الخادم؛ ولو فشل الطلب بنرجّع الحالة السابقة بدل ما نوهم المستخدم إن الإشعارات اتقرأت.
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey });
+      const previous = qc.getQueryData<Record<NotifCategory, NotifItem[]>>(queryKey);
+      if (previous) {
+        const next = { ...previous };
+        for (const cat of CATS) next[cat] = previous[cat].map((n) => (n.read ? n : { ...n, read: true }));
+        qc.setQueryData(queryKey, next);
+      }
+      return { previous };
+    },
+    onError: (err, _vars, ctx) => {
+      console.warn("mark all notifications read failed:", err);
+      if (ctx?.previous) qc.setQueryData(queryKey, ctx.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey }),
   });
 
   // ---- local UI-only state (which tab/filter is showing) ----

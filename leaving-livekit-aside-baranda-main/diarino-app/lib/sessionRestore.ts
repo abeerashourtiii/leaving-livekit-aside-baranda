@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
+import { isSystemRestore } from "./launchInfo";
 
 // ↔ استئناف التطبيق من حيث توقف بعد الخروج منه (زى يوتيوب).
 //
@@ -36,10 +37,25 @@ export async function saveResumeRoute(href: string): Promise<void> {
   } catch { /* التخزين مش متاح — مفيش استئناف بس التطبيق شغّال عادى */ }
 }
 
+// ↔ الاستئناف مسموح فقط لو التشغيل ده «استعادة من النظام» (فتح من قائمة التطبيقات المفتوحة — lib/launchInfo.ts). بعد الإغلاق النهائى
+// (السحب من القائمة) وفتح التطبيق من الأيقونة: نمسح الحالة المحفوظة ونبدأ من صفحة الريلز الرئيسية. بتتحسب مرة واحدة لكل تشغيل.
+let allowedOnce: Promise<boolean> | null = null;
+function resumeAllowed(): Promise<boolean> {
+  if (!allowedOnce) {
+    allowedOnce = (async () => {
+      const ok = await isSystemRestore();
+      if (!ok) await clearResumeState();
+      return ok;
+    })();
+  }
+  return allowedOnce;
+}
+
 // آخر صفحة محفوظة لو لسه فى المدة (من غير ما نمسحها).
 export async function peekResumeRoute(): Promise<string | null> {
   if (Platform.OS === "web") return null;
   try {
+    if (!(await resumeAllowed())) return null;
     const raw = await AsyncStorage.getItem(ROUTE_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as Saved;
@@ -61,6 +77,7 @@ export async function saveResumeReel(propertyId: string): Promise<void> {
 export async function peekResumeReel(): Promise<string | null> {
   if (Platform.OS === "web") return null;
   try {
+    if (!(await resumeAllowed())) return null;
     const raw = await AsyncStorage.getItem(REEL_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as Saved;

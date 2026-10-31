@@ -59,7 +59,6 @@ export default function AdSpaceScreen() {
   const [uploading, setUploading] = useState(false);
   const [cropSource, setCropSource] = useState<string | null>(null);
   const [days, setDays] = useState<AdSpaceDuration>(7);
-  const [rightsOk, setRightsOk] = useState(false);
 
   const isGuest = !user || !!user.is_anonymous;
   const order = orderId ? orders?.find((o) => o.id === orderId) : undefined;
@@ -113,13 +112,12 @@ export default function AdSpaceScreen() {
   function issueInvoice() {
     if (create.isPending) return;
     if (!imageUrl) { showToast(t("اختر صورة الإعلان أولًا")); return; }
-    if (!rightsOk) { showToast(t("أقرّ بملكية حقوق الصورة والالتزام بالسياسات أولًا")); return; }
     create.mutate(
       { imageUrl, durationDays: days },
       {
         onSuccess: (row) => {
           showToast(t("تم إصدار الفاتورة"));
-          setImageUrl(""); setImageInfo(""); setRightsOk(false);
+          setImageUrl(""); setImageInfo("");
           if (row?.id) router.replace({ pathname: "/ad-space", params: { orderId: row.id } } as Href);
         },
         onError: (err) => {
@@ -278,11 +276,7 @@ export default function AdSpaceScreen() {
               <View style={styles.card}>
                 <Text style={styles.sectionTitle}>{t("٣) السداد")}</Text>
                 <Text style={styles.small}>{t("بعد الضغط على «إصدار الفاتورة» تختار طريقة السداد (فودافون كاش أو اتصالات كاش أو إنستاباي) وتكتب اسم الراسل ثلاثيًا ورقم التواصل، ثم يراجع التطبيق السداد ويفعّل إعلانك.")}</Text>
-                <Pressable style={styles.checkRow} onPress={() => setRightsOk((v) => !v)} accessibilityRole="checkbox" accessibilityState={{ checked: rightsOk }}>
-                  <View style={[styles.checkbox, rightsOk && styles.checkboxOn]}>{rightsOk && <Text style={styles.checkMark}>✓</Text>}</View>
-                  <Text style={styles.checkLabel}>{t("أقرّ بأنني مالك حقوق هذه الصورة، وأن الإعلان لا يخالف الشروط والسياسات، وأتحمل مسؤوليته كاملة.")}</Text>
-                </Pressable>
-                <Pressable style={[styles.primaryBtn, (!imageUrl || !rightsOk || create.isPending) && styles.btnDisabled]} onPress={issueInvoice} disabled={create.isPending}>
+                <Pressable style={[styles.primaryBtn, (!imageUrl || create.isPending) && styles.btnDisabled]} onPress={issueInvoice} disabled={create.isPending}>
                   {create.isPending ? <ActivityIndicator color="white" size="small" /> : (
                     <Text style={styles.primaryBtnText}>{t("إصدار الفاتورة")} — {fmt(adSpacePrice(settings, days))} {t("جنيه")}</Text>
                   )}

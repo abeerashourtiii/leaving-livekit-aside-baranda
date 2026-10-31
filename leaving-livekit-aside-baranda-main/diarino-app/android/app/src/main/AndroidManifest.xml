@@ -15,6 +15,7 @@
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WAKE_LOCK"/>
+  <!-- ↔ التطبيق لا يكتب أى ملف فى التخزين المشترك/المعرض: إذن الكتابة محذوف نهائيًا (حتى لو أضافته مكتبة). -->
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
   <queries>
     <intent>

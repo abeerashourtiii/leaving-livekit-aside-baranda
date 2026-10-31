@@ -1,0 +1,25 @@
+# ↔ Cloudflare Pages: رؤوس HTTP (تُنسخ تلقائيًا من public/ إلى dist/ عند `expo export`، وتتنسخ لـ docs/ مع الـ build).
+# ملفات التحقق من الروابط العميقة لازم تتقدّم JSON وبدون redirect (Google Digital Asset Links / Apple Universal Links).
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  Cache-Control: public, max-age=300
+  Access-Control-Allow-Origin: *
+
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+  Cache-Control: public, max-age=300
+
+# ملفات التطبيق المبنية لها hash فى الاسم ← كاش طويل.
+/_expo/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# صفحة التطبيق نفسها: دايمًا نسخة جديدة (عشان التحديثات توصل).
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

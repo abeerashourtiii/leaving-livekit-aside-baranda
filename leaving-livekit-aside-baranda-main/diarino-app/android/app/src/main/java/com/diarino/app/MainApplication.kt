@@ -25,6 +25,7 @@ class MainApplication : Application(), ReactApplication {
             val packages = PackageList(this).packages
             // Packages that cannot be autolinked yet can be added manually here, for example:
             // packages.add(new MyReactNativePackage());
+            packages.add(LaunchInfoPackage()) // ↔ BarandaLaunchInfo: هل التشغيل استعادة من النظام؟ (LaunchInfo.kt)
             return packages
           }
 
@@ -48,6 +49,8 @@ class MainApplication : Application(), ReactApplication {
       load()
     }
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
+    // ↔ التطبيق لا يحفظ أى وسائط فى معرض الصور: .nomedia + تنظيف إدخالات MediaStore القديمة (MediaHygiene.kt).
+    MediaHygiene.apply(this)
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {

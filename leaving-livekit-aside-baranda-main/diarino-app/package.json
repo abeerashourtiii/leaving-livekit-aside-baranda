@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "build:terms": "node scripts/generate-terms-page.mjs",
-    "build:web": "node scripts/generate-terms-page.mjs && expo export --platform web && node scripts/publish-github-pages.mjs",
+    "build:web": "node scripts/generate-terms-page.mjs && expo export --platform web",
     "postinstall": "patch-package"
   },
   "expo": {

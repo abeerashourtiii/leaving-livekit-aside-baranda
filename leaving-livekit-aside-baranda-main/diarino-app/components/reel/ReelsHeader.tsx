@@ -4,6 +4,7 @@ import Svg, { Path } from "react-native-svg";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { rowStartingAt, topActionsSide } from "../../lib/rtl";
 import { OffersIcon } from "../shared/OffersIcon";
+import { usePiPActive } from "../../lib/pipState";
 
 // ↔ reelsHeaderHtml() in app-viewer.html.
 // Deferred for now: the LIVE pill button (only shows when there are active
@@ -29,6 +30,10 @@ export function ReelsHeader({ onOpenFilter, onOpenNotifications, notifBadgeCount
   const { language, t } = useLanguage();
   // ↔ الجرس أعلى اليمين والفلتر بجانبه (على يساره) فى العربية؛ والعكس فى الإنجليزية (الجرس أعلى الشمال والفلتر
   // على يمينه). الجروب بيبدأ من جهة الجرس: [جرس، فلتر] — على أندرويد/آيفون/الويب/APK بنفس النتيجة المرئية.
+  // ↔ فى وضع الصورة العائمة (PiP) النافذة بتعرض الشاشة كلها مصغّرة — نخفى أزرار الأعلى عشان يبان الريل نضيف.
+  const pip = usePiPActive();
+  if (pip) return null;
+
   return (
     <SafeAreaView style={styles.header} edges={["top"]} pointerEvents="box-none">
       <View style={[styles.group, { flexDirection: rowStartingAt(topActionsSide(language)) }]}>

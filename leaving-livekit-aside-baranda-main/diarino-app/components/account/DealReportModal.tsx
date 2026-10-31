@@ -28,13 +28,11 @@ export function DealReportModal({ visible, ad, onClose }: Props) {
   const styles = createStyles(themeColors);
   const { settings } = useDealSettings();
   const report = useReportDeal();
-  const [confirmed, setConfirmed] = useState(false);
   const [done, setDone] = useState<{ dueAt: string | null } | null>(null);
 
   // الحالة بتتصفّر كل مرة النافذة تتفتح.
   useEffect(() => {
     if (visible) {
-      setConfirmed(false);
       setDone(null);
     }
   }, [visible, ad?.id]);
@@ -48,7 +46,7 @@ export function DealReportModal({ visible, ad, onClose }: Props) {
   const otherLabel = isRent ? t("المستأجر") : t("المشتري");
 
   function submit() {
-    if (!ad || !confirmed || report.isPending) return;
+    if (!ad || report.isPending) return;
     report.mutate(
       { propertyId: ad.id, dealType },
       {
@@ -117,24 +115,17 @@ export function DealReportModal({ visible, ad, onClose }: Props) {
                 {t("بعد التأكيد يُغلق الإعلان ويختفي من الريلز والبحث (ويبقى في إعلاناتي وصفحتك)، وتُصدر فاتورة رسوم الخدمة لسدادها عبر إنستاباي. لا يجوز تحميل الرسم على المشتري أو المستأجر.")}
               </Text>
 
-              <Pressable style={styles.checkRow} onPress={() => setConfirmed((c) => !c)} accessibilityRole="checkbox" accessibilityState={{ checked: confirmed }}>
-                <View style={[styles.checkbox, confirmed && styles.checkboxOn]}>
-                  {confirmed && <Text style={styles.checkMark}>✓</Text>}
-                </View>
-                <Text style={styles.checkLabel}>
-                  {t("أؤكد أن الصفقة تمت وأن بياناتي صحيحة، وأقرّ بأن رسوم الخدمة مستحقة عليّ وفق")}{" "}
-                  <Text style={styles.link} onPress={openPolicy}>{t("سياسة البيع والرسوم")}</Text>
-                </Text>
-              </Pressable>
+              {/* ↔ بدون إقرار منفصل: التأكيد يخضع للشروط وسياسة البيع والرسوم اللى وافق عليها المستخدم. رابط السياسة للاطلاع فقط. */}
+              <Text style={styles.link} onPress={openPolicy}>{t("سياسة البيع والرسوم")}</Text>
 
               <View style={styles.actionsRow}>
                 <Pressable style={styles.cancelBtn} onPress={onClose} disabled={report.isPending}>
                   <Text style={styles.cancelBtnText}>{t("إلغاء")}</Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.confirmBtn, { flex: 1 }, (!confirmed || report.isPending) && styles.confirmBtnDisabled]}
+                  style={[styles.confirmBtn, { flex: 1 }, report.isPending && styles.confirmBtnDisabled]}
                   onPress={submit}
-                  disabled={!confirmed || report.isPending}
+                  disabled={report.isPending}
                 >
                   {report.isPending ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.confirmBtnText}>{t("تأكيد")}</Text>}
                 </Pressable>

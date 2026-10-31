@@ -3,6 +3,7 @@ import { DeepLinkSessionGate } from "../../../components/shared/DeepLinkSessionG
 import { buildReelLink } from "../../../lib/shareLinks";
 import { router, useLocalSearchParams } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
+import { usePiPActive } from "../../../lib/pipState";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Share, FlatList, ViewToken, ListRenderItemInfo } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { MAX_PINNED_PROPERTIES, useMyProperties, usePropertyDetail } from "../../../lib/hooks/useProperties";
@@ -131,6 +132,7 @@ function ReelsPager({ items, startIndex, onEndReached }: { items: Property[]; st
   // ↔ إصلاح "الريل بيكمّل شغال لما أفتح صفحة المعلن": شاشة الريل بتفضل متركّبة تحت صفحة المعلن (Stack)، فالريل النشط
   // لازم يوقف (فيديو + موسيقى + سلايد شو) لما الشاشة تفقد التركيز ويكمّل من نفس النقطة لما نرجع (نفس أسلوب تبويب الريلز).
   const isFocused = useIsFocused();
+  const pipUi = usePiPActive(); // ↔ PiP: نخفى زر الإغلاق من النافذة العائمة
 
   const [activeIndex, setActiveIndex] = useState(startIndex);
   const activeIndexRef = useRef(startIndex);
@@ -211,11 +213,11 @@ function ReelsPager({ items, startIndex, onEndReached }: { items: Property[]; st
         removeClippedSubviews={false}
       />
 
-      <Pressable style={styles.closeBtn} onPress={goBackOrHome} hitSlop={8}>
+      {!pipUi && <Pressable style={styles.closeBtn} onPress={goBackOrHome} hitSlop={8}>
         <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5}>
           <Path d="M6 6l12 12M18 6L6 18" />
         </Svg>
-      </Pressable>
+      </Pressable>}
 
       <ReportModal
         visible={!!reportProperty}
@@ -239,7 +241,8 @@ function SingleReelScreen({ id, openDetails = false, openComments = false }: { i
   const { favoriteProperties, toggleFavoriteProperty } = useFavorites();
   const { likedIds, toggleLike } = useLikes();
   const compareSelection = useCompareSelection();
-  const isFocused = useIsFocused(); // ↔ نفس إصلاح ReelsPager: الريل يقف لما صفحة المعلن (أو أى صفحة) تتفتح فوقه
+  const isFocused = useIsFocused();
+  const pipUi = usePiPActive(); // ↔ PiP: نخفى زر الإغلاق من النافذة العائمة // ↔ نفس إصلاح ReelsPager: الريل يقف لما صفحة المعلن (أو أى صفحة) تتفتح فوقه
 
   const [detailsOpen, setDetailsOpen] = useState(openDetails);
   const [reportVisible, setReportVisible] = useState(false);
@@ -290,11 +293,11 @@ function SingleReelScreen({ id, openDetails = false, openComments = false }: { i
         onReport={() => setReportVisible(true)}
       />
 
-      <Pressable style={styles.closeBtn} onPress={goBackOrHome} hitSlop={8}>
+      {!pipUi && <Pressable style={styles.closeBtn} onPress={goBackOrHome} hitSlop={8}>
         <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5}>
           <Path d="M6 6l12 12M18 6L6 18" />
         </Svg>
-      </Pressable>
+      </Pressable>}
 
       <ReportModal
         visible={reportVisible}

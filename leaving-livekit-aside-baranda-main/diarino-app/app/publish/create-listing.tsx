@@ -114,8 +114,8 @@ export default function CreateListingScreen() {
   const [phone, setPhone] = useState<PhoneInputValue>({ countryIso2: "", localNumber: "" });
   const [sharePlatforms, setSharePlatforms] = useState<Set<SocialPlatform>>(new Set());
   const [errors, setErrors] = useState<Set<string>>(new Set());
-  // ↔ إقرار ملكية حقوق الوسائط (سياسة حقوق النشر / نشر الصور والفيديو) — إلزامى عند نشر إعلان جديد وعند تعديل إعلان قائم، ووقته بيتسجّل فى properties.rights_declared_at.
-  const [rightsAccepted, setRightsAccepted] = useState(false);
+  // ↔ لا يوجد إقرار منفصل لملكية الحقوق هنا: الموافقة على الشروط والأحكام وسياسات الاستخدام (حقوق النشر / نشر الصور والفيديو) تغطيه.
+  // وقت النشر بيتسجّل فى properties.rights_declared_at كأثر لهذه الموافقة (rightsDeclaredAt تحت).
   const { settings: dealSettings } = useDealSettings();
   const scrollRef = useRef<ScrollView>(null);
 
@@ -422,7 +422,6 @@ export default function CreateListingScreen() {
     if (!description.trim()) errs.add("description");
     if (mediaMode === "video" ? !videoItem : photoItems.length === 0) errs.add("media");
     if (!phone.countryIso2 || !validateAndFormatPhone(phone.localNumber, phone.countryIso2).valid) errs.add("phone");
-    if (!rightsAccepted) errs.add("rights");
     setErrors(errs);
     if (errs.size > 0) {
       scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -838,24 +837,6 @@ export default function CreateListingScreen() {
             {t("نشر الإعلان مجاني. يُستحق رسم")} {dealSettings.feeEgp.toLocaleString("en-US")} {t("جنيه عند إتمام البيع أو التأجير فقط، ويتحمله البائع/المؤجّر أو الوسيط وحده، ولا يتحمل المشتري أو المستأجر أي رسم.")}
           </Text>
         </View>
-        {(
-          <>
-            <Pressable
-              style={styles.rightsRow}
-              onPress={() => { setRightsAccepted((v) => !v); setErrors((e) => { const n = new Set(e); n.delete("rights"); return n; }); }}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: rightsAccepted }}
-            >
-              <View style={[styles.rightsBox, rightsAccepted && styles.rightsBoxOn, errors.has("rights") && !rightsAccepted && styles.rightsBoxError]}>
-                {rightsAccepted && <Text style={styles.rightsMark}>✓</Text>}
-              </View>
-              <Text style={styles.rightsLabel}>
-                {t("أقرّ بأنني مالك حقوق هذه الصور والفيديو أو مرخَّص لي بها، وأنها لا تحوي موسيقى أو مقاطع مقتبسة من غيري، وأتحمل المسؤولية القانونية الكاملة عن ذلك.")}
-              </Text>
-            </Pressable>
-            <FormError text={t("يجب الإقرار بملكية الحقوق للمتابعة")} show={errors.has("rights")} />
-          </>
-        )}
       </ScrollView>
 
       {/* ↔ الشريط السفلي (نشر/مسودة) لازم يقف *فوق* شريط تنقّل النظام (أزرار أو

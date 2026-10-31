@@ -56,7 +56,7 @@ export async function createLiveRoom(roomName: string, title: string): Promise<v
     status: "live",
     recording_status: "none",
   };
-  // ↔ إقرار الحقوق قبل البث (lives.rights_declared_at — 20261015000000). لو الـ migration لسه ما اتطبقتش (العمود مش موجود)
+  // ↔ وقت بدء البث بيتسجّل فى lives.rights_declared_at (20261015000000) كأثر لموافقة المستخدم على الشروط وسياسات الاستخدام (بدون مربع إقرار). لو الـ migration لسه ما اتطبقتش (العمود مش موجود)
   // بنعيد المحاولة من غيره بدل ما نمنع البث.
   let { error } = await supabase.from("lives").insert({ ...base, rights_declared_at: new Date().toISOString() });
   if (error && (error.code === "PGRST204" || error.code === "42703" || /rights_declared_at/i.test(error.message))) {

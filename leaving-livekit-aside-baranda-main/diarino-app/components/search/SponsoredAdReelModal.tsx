@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { usePiPActive } from "../../lib/pipState";
 import { buildReelLink } from "../../lib/shareLinks";
 import { Modal, View, Pressable, StyleSheet, Share } from "react-native";
 import { router } from "expo-router";
@@ -31,6 +32,7 @@ type Props = {
 export function SponsoredAdReelModal({ property, sponsoredReelId, onClose }: Props) {
   const { t } = useLanguage();
   const insets = useSafeAreaInsets();
+  const pipUi = usePiPActive(); // ↔ PiP: نخفى زر الإغلاق من النافذة العائمة
   const { followedIds, toggleFollow } = useFollows();
   const { favoriteProperties, toggleFavoriteProperty } = useFavorites();
   const { likedIds, toggleLike } = useLikes();
@@ -87,7 +89,7 @@ export function SponsoredAdReelModal({ property, sponsoredReelId, onClose }: Pro
           onShare={handleShare}
           onReport={() => setReportSheetOpen(true)}
         />
-        {!detailsOpen && (
+        {!detailsOpen && !pipUi && (
           <Pressable style={[styles.closeBtn, { top: insets.top + 10 }]} onPress={onClose} hitSlop={10}>
             <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5}>
               <Path d="M18 6L6 18M6 6l12 12" />

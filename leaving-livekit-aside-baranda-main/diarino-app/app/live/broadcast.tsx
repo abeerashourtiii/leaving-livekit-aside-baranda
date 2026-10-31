@@ -100,8 +100,7 @@ function BroadcastFlow() {
   const [title, setTitle] = useState("");
   const [phase, setPhase] = useState<"setup" | "starting" | "live">("setup");
   const [startError, setStartError] = useState<Error | null>(null);
-  // ↔ إقرار الحقوق قبل البث (سياسة حقوق النشر): إلزامى لتفعيل «ابدأ البث».
-  const [rightsAccepted, setRightsAccepted] = useState(false);
+  // ↔ لا يوجد إقرار منفصل قبل البث: الموافقة على الشروط والأحكام وسياسات الاستخدام (حقوق النشر، نشر الصور والفيديو، البث المباشر) تغطيه.
   const [initialFacingMode, setInitialFacingMode] = useState<"user" | "environment">("user");
 
   const roomName = useMemo(() => `live_${user?.id ?? "anon"}_${Date.now()}`, [user?.id]);
@@ -179,25 +178,10 @@ function BroadcastFlow() {
           </Pressable>
         </View>
 
-        <Pressable
-          style={styles.rightsRow}
-          onPress={() => setRightsAccepted((v) => !v)}
-          disabled={phase === "starting"}
-          accessibilityRole="checkbox"
-          accessibilityState={{ checked: rightsAccepted }}
-        >
-          <View style={[styles.rightsBox, rightsAccepted && styles.rightsBoxOn]}>
-            {rightsAccepted && <Text style={styles.rightsMark}>✓</Text>}
-          </View>
-          <Text style={styles.rightsLabel}>
-            {t("أقرّ بأنني مالك حقوق كل ما سأبثه أو مرخَّص لي به، وأنه لا يحوي موسيقى أو مقاطع مقتبسة من غيري، وأنني سأُعلم الحاضرين بأن البث قد يُسجَّل، وأتحمل المسؤولية القانونية الكاملة عن ذلك.")}
-          </Text>
-        </Pressable>
-
         {startError && <Text style={styles.wordCountError}>{startError.message}</Text>}
         <Pressable
-          style={[styles.goLiveBtn, (!titleValid || !rightsAccepted || phase === "starting") && styles.goLiveBtnDisabled]}
-          disabled={!titleValid || !rightsAccepted || phase === "starting"}
+          style={[styles.goLiveBtn, (!titleValid || phase === "starting") && styles.goLiveBtnDisabled]}
+          disabled={!titleValid || phase === "starting"}
           onPress={startBroadcast}
         >
           <Text style={styles.goLiveBtnText}>{phase === "starting" ? t("جارٍ البدء...") : t("ابدأ البث")}</Text>
