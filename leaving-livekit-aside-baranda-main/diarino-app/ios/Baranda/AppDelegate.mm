@@ -2,42 +2,8 @@
 
 #import <React/RCTBundleURLProvider.h>
 #import <React/RCTLinkingManager.h>
-#import <React/RCTBridgeModule.h>
-
-// ↔ استئناف التطبيق من حيث توقف *فقط* لو النظام هو اللى استعاده (OS state restoration)، أما بعد الإغلاق النهائي بالسحب من قائمة
-// التطبيقات فآيفون بيمسح الحالة المحفوظة (حسب توثيق أبل) فبيبدأ التطبيق من الرئيسية. JS بيقرا القيمة من BarandaLaunchInfo.isSystemRestore().
-// ملاحظة: التحقق الفعلى على جهاز آيفون لازم — لو الاستئناف ما اشتغلش على iOS غيّر IOS_USE_RESTORE_SIGNAL إلى false فى lib/launchInfo.ts.
-static BOOL gBarandaSystemRestored = NO;
-
-@interface BarandaLaunchInfo : NSObject <RCTBridgeModule>
-@end
-
-@implementation BarandaLaunchInfo
-RCT_EXPORT_MODULE()
-+ (BOOL)requiresMainQueueSetup { return NO; }
-RCT_EXPORT_METHOD(isSystemRestore:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
-{
-  resolve(@(gBarandaSystemRestored));
-}
-@end
 
 @implementation AppDelegate
-
-// ---- OS state restoration: بنطلب من النظام يحفظ/يستعيد حالة (فاضية) عشان نعرف إنه استعاد التطبيق ولم يُغلق نهائيًا ----
-- (BOOL)application:(UIApplication *)application shouldSaveSecureApplicationState:(NSCoder *)coder { return YES; }
-- (BOOL)application:(UIApplication *)application shouldRestoreSecureApplicationState:(NSCoder *)coder { return YES; }
-- (BOOL)application:(UIApplication *)application shouldSaveApplicationState:(NSCoder *)coder { return YES; }
-- (BOOL)application:(UIApplication *)application shouldRestoreApplicationState:(NSCoder *)coder { return YES; }
-- (void)application:(UIApplication *)application willEncodeRestorableStateWithCoder:(NSCoder *)coder
-{
-  [coder encodeBool:YES forKey:@"baranda.resume"];
-}
-- (void)application:(UIApplication *)application didDecodeRestorableStateWithCoder:(NSCoder *)coder
-{
-  if ([coder decodeBoolForKey:@"baranda.resume"]) {
-    gBarandaSystemRestored = YES;
-  }
-}
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
