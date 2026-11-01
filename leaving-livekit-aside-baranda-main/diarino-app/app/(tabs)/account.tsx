@@ -1,0 +1,727 @@
+import { adWindow, requestWindow, formatRemaining } from "../../lib/adWindow";
+import { KeyboardAvoid } from "../../components/shared/KeyboardAvoid";
+import { useOffersTopBar } from "../../lib/hooks/useOffersTopBar";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { openNotificationItem } from "../../lib/notificationNavigation";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import {
+  View, Text, Pressable, ScrollView, StyleSheet, TextInput, Modal, Alert, ActivityIndicator,
+} from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import { Image } from "expo-image";
+import Svg, { Path, Rect, Circle } from "react-native-svg";
+import { MAX_PINNED_PROPERTIES, useMyProperties, useProperties } from "../../lib/hooks/useProperties";
+import { padToEvenColumns } from "../../lib/gridPadding";
+import { AdGridCard } from "../../components/property/AdGridCard";
+import { SponsoredPill } from "../../components/property/SponsoredPill";
+import { sponsorFirst } from "../../lib/listingOrder";
+import { useSponsorMap } from "../../lib/hooks/useSponsoredReels";
+import { useMyRequests, useRequests, useDeleteRequest } from "../../lib/hooks/useRequests";
+import { fmtPrice } from "../../lib/types";
+import { PageTopBar } from "../../components/shared/PageTopBar";
+import { NotificationsDropdown } from "../../components/notifications/NotificationsDropdown";
+import { useNotifications } from "../../lib/hooks/useNotifications";
+import { useFavorites } from "../../lib/hooks/useFavorites";
+import { useMyContent } from "../../lib/hooks/useMyContent";
+import { useSyncProcessingRecordings } from "../../lib/hooks/useLiveRecordingStatus";
+import { AdActionSheet } from "../../components/account/AdActionSheet";
+import { ConfirmModal } from "../../components/shared/ConfirmModal";
+import { LiveActionSheet } from "../../components/account/LiveActionSheet";
+import { Property } from "../../lib/types";
+import { SavedLive } from "../../data/saved-live-types";
+import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
+import { useProfile } from "../../lib/hooks/useProfile";
+import { showToast } from "../../components/shared/Toast";
+import { useLanguage } from "../../lib/hooks/useLanguage";
+import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
+import { uploadToCloudinary, cldOptimized } from "../../lib/cloudinary";
+import { useLogMedia } from "../../lib/hooks/useMedia";
+import { useDrafts, useDraftMutations } from "../../lib/hooks/useDrafts";
+import { useFeatureFlag } from "../../lib/hooks/useFeatureFlags";
+import { useMyDeals } from "../../lib/hooks/useDeals";
+import { useMyPromotions, livePromotionsFor } from "../../lib/hooks/usePromotions";
+
+type AccountTab = "ads" | "requests" | "lives" | "favorites" | "drafts";
+
+export default function AccountScreen() {
+  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
+  const { displayName, user } = useCurrentUser();
+  const logMedia = useLogMedia();
+  const { t, language } = useLanguage();
+  const isEn = language === "en";
+  const themeColors = useThemeColors();
+  const styles = createStyles(themeColors);
+  useSyncProcessingRecordings();
+  const [activeTab, setActiveTab] = useState<AccountTab>("ads");
+  const liveFeatureEnabled = useFeatureFlag("live");
+
+  useEffect(() => {
+    if (tabParam && ["ads", "requests", "lives", "favorites", "drafts"].includes(tabParam)) {
+      if (tabParam === "lives" && !liveFeatureEnabled) return;
+      setActiveTab(tabParam as AccountTab);
+    }
+  }, [tabParam, liveFeatureEnabled]);
+
+  // ↔ لو الأدمن عطّل خاصية "البث المباشر" وإحنا واقفين فعلًا على تاب
+  // "لايفات" (مثلًا كان متفعّل وقت ما دخلنا الصفحة)، نرجع لتاب "إعلاناتي"
+  // بدل ما نسيب المستخدم واقف على تاب اختفى زراره خالص.
+  useEffect(() => {
+    if (!liveFeatureEnabled && activeTab === "lives") {
+      setActiveTab("ads");
+    }
+  }, [liveFeatureEnabled, activeTab]);
+
+  // ↔ الاسم/الصورة/النبذة من نفس كاش البروفايل المشترك (useProfile) — أى تغيير من
+  // «تعديل بيانات الحساب» أو من هنا بيظهر لحظيًا، وبعدها فى صفحة المعلن والريلز والقائمة.
+  const { profile, update: updateProfile } = useProfile();
+  const avatarUri = profile?.avatarUrl ?? null;
+  const bio = profile?.bio ?? "";
+  const profileName = profile?.fullName?.trim() || displayName;
+  const [bioSaving, setBioSaving] = useState(false);
+  const [bioModalVisible, setBioModalVisible] = useState(false);
+  const [bioDraft, setBioDraft] = useState("");
+
+  const [notifMenuVisible, setNotifMenuVisible] = useState(false);
+  const notifications = useNotifications();
+  // ↔ أيقونة «العروض» جنب جرس الإشعارات + نقطتها الحمراء (منفصلة عن الجرس).
+  const offersBar = useOffersTopBar();
+
+  const { favoriteProperties, favoriteRequests, totalCount, toggleFavoriteProperty, toggleFavoriteRequest } = useFavorites();
+  const { savedLives } = useMyContent();
+  const myRequests = useMyRequests(user?.id);
+  const { data: allRequests = [] } = useRequests();
+  const { data: allProperties = [] } = useProperties();
+  const deleteRequest = useDeleteRequest();
+  const { data: myAdsRaw = [], isLoading: adsLoading, isError: adsError, refetch: refetchAds } = useMyProperties(user?.id);
+  // ↔ صفقات المعلن (رسوم الخدمة): تُستخدم لملاحظة حالة الفاتورة على كارت الإعلان المُغلق (تم البيع / تم الإيجار).
+  const { data: myDeals } = useMyDeals(user?.id);
+  // ↔ طلبات الترويج (افتتاحي / مميز): ملاحظة حالتها على كارت الإعلان.
+  const { data: myPromos } = useMyPromotions(user?.id);
+  // ↔ المثبّتة فى الأول (الأحدث تثبيتًا أولًا) وبعدها الأحدث نشرًا — نفس ترتيب صفحة المعلن.
+  // ↔ الإعلانات الممولة (ترويج مفعّل) فى الأعلى قبل المثبّتة — الأحدث تفعيلًا أولًا — وبشارة «ممول» (نفس صفحة البحث).
+  const sponsorMap = useSponsorMap();
+  const myAds = useMemo(
+    () => sponsorFirst([...myAdsRaw].sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+      if (a.pinned && b.pinned) return (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0);
+      return b.createdAt - a.createdAt;
+    }), sponsorMap),
+    [myAdsRaw, sponsorMap]
+  );
+  const pinnedAdsCount = myAds.filter((a) => a.pinned).length;
+  // ↔ صفوف من عمودين (الأخير بيتكمّل بعنصر فاضى عشان يبقى بنص الصف زى باقى الكروت).
+  const adRows = useMemo(() => {
+    const padded = padToEvenColumns(myAds);
+    const rows: (Property | null)[][] = [];
+    for (let i = 0; i < padded.length; i += 2) rows.push(padded.slice(i, i + 2));
+    return rows;
+  }, [myAds]);
+  // ↔ كل مرة الشاشة تاخد التركيز (مثلًا بعد النشر أو التعديل من create-listing)
+  // نجيب إعلاناتي من الخادم من جديد — الإعلان المنشور لازم يظهر فورًا.
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.id) void refetchAds();
+    }, [user?.id, refetchAds])
+  );
+  const { data: listingDrafts = [] } = useDrafts("listing");
+  const { data: requestDrafts = [] } = useDrafts("request");
+  
+  const drafts = useMemo(() => {
+    return [...listingDrafts, ...requestDrafts].sort((a, b) => 
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  }, [listingDrafts, requestDrafts]);
+
+  const { remove: removeDraft } = useDraftMutations();
+
+  // ↔ أى حذف/إزالة من صفحة الحساب (طلب، عنصر من المفضلة، مسودة) لازم يعدّى على نافذة
+  // تأكيد قبل التنفيذ — قبل كده الأزرار دى كانت بتنفّذ فورًا بلمسة واحدة. (حذف الإعلان
+  // واللايف ليهم نافذة تأكيد فى AdActionSheet / LiveActionSheet.) ConfirmModal هو Modal
+  // أصلى فبيشتغل نفسه على أندرويد وآيفون والويب (Alert.alert مبيشتغلش على الويب).
+  type PendingRemoval = { kind: "request" | "favProperty" | "favRequest" | "draft"; id: string };
+  const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
+  const removalCopy = pendingRemoval?.kind === "request"
+    ? { title: t("حذف الطلب"), text: t("هل أنت متأكد من حذف هذا الطلب؟ لا يمكن التراجع عن هذا الإجراء."), confirm: t("حذف") }
+    : pendingRemoval?.kind === "draft"
+      ? { title: t("حذف المسودة"), text: t("هل أنت متأكد من حذف هذه المسودة؟ لا يمكن التراجع عن هذا الإجراء."), confirm: t("حذف") }
+      : { title: t("إزالة من المفضلة"), text: t("هل تريد إزالة هذا العنصر من المفضلة؟"), confirm: t("إزالة") };
+
+  function confirmRemoval() {
+    const target = pendingRemoval;
+    setPendingRemoval(null);
+    if (!target) return;
+    if (target.kind === "request") {
+      deleteRequest.mutate(target.id, {
+        onSuccess: () => showToast(t("تم حذف الطلب")),
+        onError: () => showToast(t("تعذر حذف الطلب، حاول مرة أخرى")),
+      });
+    } else if (target.kind === "draft") {
+      removeDraft.mutate(target.id, {
+        onSuccess: () => showToast(t("تم حذف المسودة")),
+        onError: () => showToast(t("تعذر حذف المسودة، حاول مرة أخرى")),
+      });
+    } else if (target.kind === "favProperty") {
+      toggleFavoriteProperty(target.id);
+    } else {
+      toggleFavoriteRequest(target.id);
+    }
+  }
+  const [adSheetTarget, setAdSheetTarget] = useState<Property | null>(null);
+  const [liveSheetTarget, setLiveSheetTarget] = useState<SavedLive | null>(null);
+
+  const favProps = useMemo(() => allProperties.filter((p) => favoriteProperties.has(p.id)), [allProperties, favoriteProperties]);
+  const favReqs = useMemo(() => allRequests.filter((r) => favoriteRequests.has(r.id)), [allRequests, favoriteRequests]);
+
+  async function pickAvatar() {
+    if (!user?.id) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled) return;
+
+    const uri = result.assets[0].uri;
+    try {
+      const uploadResult = await uploadToCloudinary(uri, "image");
+      logMedia.mutate({ ownerId: user.id, type: "image", context: "avatar", result: uploadResult });
+      await updateProfile.mutateAsync({ avatarUrl: uploadResult.url });
+    } catch {
+      // Alert.alert مبيظهرش على الويب — Toast بيشتغل على كل المنصات.
+      showToast(`${t("تعذر رفع الصورة")} — ${t("حاول مرة أخرى.")}`);
+    }
+  }
+
+  // ↔ النبذة بقت بتتحفظ فعليًا فى profiles.bio (قبل كده كانت حالة محلية بتضيع)
+  // وبتظهر فى صفحة المعلن (profiles_public.bio — migration 20261007000002).
+  async function saveBio() {
+    if (bioSaving) return;
+    setBioSaving(true);
+    try {
+      await updateProfile.mutateAsync({ bio: bioDraft.trim() });
+      setBioModalVisible(false);
+    } catch {
+      showToast(t("تعذر حفظ النبذة، حاول مرة أخرى"));
+    } finally {
+      setBioSaving(false);
+    }
+  }
+
+  const handleOpenLiveReplay = (live: SavedLive) => {
+    if (live.recordingUrl || live.recordingStatus === "ready" || !live.recordingStatus) {
+      router.push({
+        pathname: "/live/replay/[id]",
+        params: { id: live.id }
+      });
+    } else {
+      setLiveSheetTarget(live);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <PageTopBar
+        title="حسابي"
+        notifBadgeCount={notifications.totalUnread}
+        onOpenNotifications={() => setNotifMenuVisible(true)}
+        onOpenOffers={offersBar.onOpenOffers}
+        offersBadge={offersBar.offersBadge}
+      />
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+        <View style={styles.profileHeader}>
+          <Pressable style={styles.avatar} onPress={pickAvatar}>
+            {avatarUri ? (
+              <Image source={{ uri: cldOptimized(avatarUri, "w_300,h_300,c_fill,q_auto,f_auto") }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            ) : (
+              <Text style={styles.avatarText}>{profileName.charAt(0)}</Text>
+            )}
+            <View style={styles.avatarEditBadge}>
+              <Svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2}>
+                <Path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+              </Svg>
+            </View>
+          </Pressable>
+          <Text style={styles.username}>{profileName}</Text>
+          <Text style={styles.handle}>@user_baranda</Text>
+        </View>
+
+        <Pressable style={styles.bioBox} onPress={() => { setBioDraft(bio); setBioModalVisible(true); }}>
+          <Text style={styles.bioText}>{bio || t("اضغط لإضافة نبذة عنك ...")}</Text>
+        </Pressable>
+
+        <View style={styles.tabs}>
+          <TabBtn active={activeTab === "ads"} label="إعلاناتي" count={myAds.length} onPress={() => setActiveTab("ads")} icon={AdsIcon} />
+          <TabBtn active={activeTab === "requests"} label="طلباتي" count={myRequests.length} onPress={() => setActiveTab("requests")} icon={RequestsIcon} />
+          {liveFeatureEnabled && (
+            <TabBtn active={activeTab === "lives"} label="لايفات" count={savedLives.length} onPress={() => setActiveTab("lives")} icon={LivesIcon} />
+          )}
+          <TabBtn active={activeTab === "favorites"} label="المفضلة" count={totalCount} onPress={() => setActiveTab("favorites")} icon={FavIcon} />
+          <TabBtn active={activeTab === "drafts"} label="المسودات" count={drafts.length} onPress={() => setActiveTab("drafts")} icon={DraftsIcon} />
+        </View>
+
+        <View style={styles.content}>
+          {activeTab === "ads" && (
+            adsLoading && myAds.length === 0 ? (
+              <View style={{ paddingVertical: 40, alignItems: "center" }}><ActivityIndicator color="#22A652" /></View>
+            ) : adsError && myAds.length === 0 ? (
+              <EmptyState
+                icon={<Svg width={56} height={56} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth={1.5}><Circle cx={12} cy={12} r={9} /><Path d="M12 8v5M12 16.5v.5" /></Svg>}
+                title="تعذر تحميل إعلاناتك"
+                actionLabel="إعادة المحاولة"
+                onAction={() => { void refetchAds(); }}
+              />
+            ) : myAds.length === 0 ? (
+              <EmptyState
+                icon={<Svg width={56} height={56} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth={1.5}><Rect x={3} y={3} width={18} height={18} rx={2} /><Path d="M3 9h18M9 21V9" /></Svg>}
+                title="لا توجد إعلانات"
+                subtitle="للنشر: انتقل إلى صفحة القائمة"
+                actionLabel="اذهب للقائمة"
+                onAction={() => router.push("/(tabs)/menu")}
+              />
+            ) : (
+              <>
+              <Text style={styles.pinHint}>📌 {pinnedAdsCount}/{MAX_PINNED_PROPERTIES} {t("مثبتة في صفحة المعلن")}</Text>
+              {/* ↔ نفس كارت البحث وصفحة المعلن (components/property/AdGridCard.tsx):
+                  عمودين فى الصف وبنفس الحجم، والكارت الأخير المنفرد بنص الصف. */}
+              <View style={styles.adsGrid}>
+                {adRows.map((row, rowIndex) => (
+                  <View key={rowIndex} style={styles.adsRow}>
+                    {row.map((ad, colIndex) => ad === null ? (
+                      <View key={`filler-${colIndex}`} style={{ flex: 1 }} />
+                    ) : (
+                      <AdGridCard
+                        key={ad.id}
+                        item={ad}
+                        index={rowIndex * 2 + colIndex}
+                        // ↔ رسالة المراجعة على الكارت: «قيد المراجعة» لحد موافقة الأدمن (وبعدها بتختفى هى والشارة)، أو سبب الرفض.
+                        note={
+                          ad.moderationStatus === "pending"
+                            ? { tone: "pending", text: t("قيد المراجعة: سيظهر إعلانك للجميع بعد موافقة الإدارة.") }
+                            : ad.moderationStatus === "rejected"
+                            ? { tone: "rejected", text: `${t("تم رفض الإعلان")}${ad.moderationReason ? ` — ${t("السبب")}: ${ad.moderationReason}` : ""}. ${t("عدّل الإعلان لإعادة إرساله للمراجعة.")}` }
+                            : ad.closedType
+                            ? (() => {
+                                // ↔ إعلان مُغلق بصفقة: نوضّح حالة فاتورة رسوم الخدمة (السداد يتم من ⋮ ← الفاتورة وتأكيد السداد).
+                                const st = myDeals?.get(ad.id)?.status;
+                                if (st === "paid") return { tone: "info" as const, text: t("تم سداد رسوم الخدمة. شكرًا لك.") };
+                                if (st === "submitted") return { tone: "info" as const, text: t("تم إرسال تأكيد السداد وقيد المراجعة.") };
+                                if (st === "reported" || st === "invoiced" || st === "disputed") return { tone: "pending" as const, text: t("رسوم الخدمة مستحقة — اضغط ⋮ ثم «الفاتورة وتأكيد السداد».") };
+                                return undefined;
+                              })()
+                            : livePromotionsFor(myPromos, ad.id).length > 0
+                            ? (() => {
+                                // ↔ ترويج مدفوع قائم لهذا الإعلان: مفعّل (حتى تاريخ) / بانتظار مراجعة السداد / بانتظار السداد.
+                                const p = livePromotionsFor(myPromos, ad.id)[0];
+                                const kindLabel = p.kind === "intro" ? t("افتتاحي") : t("مميز");
+                                if (p.status === "active") {
+                                  const until = p.endsAt ? new Date(p.endsAt).toLocaleDateString(language === "ar" ? "ar-EG" : "en-US", { month: "long", day: "numeric" }) : "";
+                                  return { tone: "info" as const, text: `${t("ترويج")} ${kindLabel} ${t("مفعّل حتى")} ${until}` };
+                                }
+                                if (p.status === "submitted") return { tone: "info" as const, text: `${t("ترويج")} ${kindLabel}: ${t("تم إرسال تأكيد السداد وقيد المراجعة.")}` };
+                                return { tone: "pending" as const, text: `${t("ترويج")} ${kindLabel}: ${t("بانتظار السداد — اضغط ⋮ ثم «اجعل الإعلان افتتاحي أو مميز».")}` };
+                              })()
+                            : (() => {
+                                // ↔ إعلان منشور داخل نافذة الـ 24 ساعة: نوضّح للمعلن الوقت المتبقى للتعديل والحذف.
+                                const w = adWindow(ad);
+                                return w.published && w.remainingMs != null && w.remainingMs > 0 && !ad.closedType
+                                  ? { tone: "info" as const, text: `${t("يمكنك تعديل إعلانك أو حذفه خلال")} ${formatRemaining(w.remainingMs, language)}` }
+                                  : undefined;
+                              })()
+                        }
+                        onPress={() => router.push(`/property/${ad.id}/reel?sellerId=${ad.seller.id}`)}
+                        onLongPress={() => setAdSheetTarget(ad)}
+                        topStart={
+                          <Pressable
+                            style={styles.adMoreBtn}
+                            onPress={(e) => { e.stopPropagation(); setAdSheetTarget(ad); }}
+                            hitSlop={6}
+                          >
+                            <Svg width={14} height={14} viewBox="0 0 24 24" fill="white">
+                              <Circle cx={12} cy={5} r={1.8} /><Circle cx={12} cy={12} r={1.8} /><Circle cx={12} cy={19} r={1.8} />
+                            </Svg>
+                          </Pressable>
+                        }
+                        bottomStart={
+                          (ad.pinned || (ad.moderationStatus && ad.moderationStatus !== "approved") || (sponsorMap.has(ad.id) && !ad.closedType)) ? (
+                            <>
+                              {sponsorMap.has(ad.id) && !ad.closedType && <SponsoredPill />}
+                              {ad.pinned && (
+                                <View style={styles.pinnedBadge}>
+                                  <Svg width={10} height={10} viewBox="0 0 24 24" fill="white"><Path d="M12 17v5M9 10.76V6a2 2 0 012-2h2a2 2 0 012 2v4.76a2 2 0 00.4 1.2L18 15H6l2.6-3.04a2 2 0 00.4-1.2z" /></Svg>
+                                </View>
+                              )}
+                              {ad.moderationStatus && ad.moderationStatus !== "approved" && (
+                                <View style={[styles.adStatusBadge, ad.moderationStatus === "rejected" && styles.adStatusBadgeRejected]}>
+                                  <Text style={styles.adStatusBadgeText}>{ad.moderationStatus === "rejected" ? t("مرفوض") : t("قيد المراجعة")}</Text>
+                                </View>
+                              )}
+                            </>
+                          ) : undefined
+                        }
+                      />
+                    ))}
+                  </View>
+                ))}
+              </View>
+              </>
+            )
+          )}
+
+          {activeTab === "requests" && (
+            myRequests.length === 0 ? (
+              <EmptyState
+                icon={<Svg width={56} height={56} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth={1.5}><Path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><Rect x={9} y={3} width={6} height={4} rx={1} /></Svg>}
+                title="لا توجد طلبات"
+              />
+            ) : (
+              <View>
+                {myRequests.map((r) => (
+                  <View key={r.id} style={styles.favCard}>
+                    <View style={styles.favCardTop}>
+                      <Text style={styles.favCardTitle}>{t(r.type)} {r.purpose === "sale" ? t("للبيع") : t("للإيجار")}</Text>
+                      <Text style={styles.favCardPrice}>{t("حتى")} {r.priceMax ? fmtPrice(r.priceMax) : "—"} {t("ج.م")}</Text>
+                    </View>
+                    <Text style={styles.favCardLoc}>📍 {r.province} · {r.location}</Text>
+                    {/* ↔ الحذف متاح خلال 24 ساعة من عرض الطلب فقط؛ بعدها من حق المشرفين (migration 20261021000000). */}
+                    {requestWindow(r.createdAt).deletable ? (
+                      <>
+                        <Pressable style={styles.removeBtn} onPress={() => setPendingRemoval({ kind: "request", id: r.id })}>
+                          <Text style={styles.removeBtnText}>🗑️ {t("حذف")}</Text>
+                        </Pressable>
+                        <Text style={styles.requestWindowNote}>{`${t("يمكنك حذف الطلب خلال")} ${formatRemaining(requestWindow(r.createdAt).remainingMs, language)}`}</Text>
+                      </>
+                    ) : (
+                      <Text style={styles.requestWindowNote}>{t("انتهت مدة الحذف (24 ساعة من عرض الطلب). الحذف من حق المشرفين.")}</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )
+          )}
+
+          {activeTab === "lives" && liveFeatureEnabled && (
+            savedLives.length === 0 ? (
+              <EmptyState
+                icon={<Svg width={56} height={56} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth={1.5}><Rect x={2} y={7} width={20} height={14} rx={2} /><Path d="M8 2l4 4 4-4" /></Svg>}
+                title="لا توجد لايفات محفوظة"
+                subtitle="ابدأ لايف من صفحة القائمة"
+                actionLabel="بدء بث مباشر"
+                onAction={() => {
+                  if (user?.is_anonymous) {
+                    Alert.alert(t("يجب تسجيل الدخول بحساب Google لبدء بث مباشر"), t("المتابعة كضيف لا تتيح بدء بث مباشر."));
+                    return;
+                  }
+                  router.push("/live/broadcast");
+                }}
+              />
+            ) : (
+              <View style={styles.myAdsGrid}>
+                {savedLives.map((live) => (
+                  <Pressable
+                    key={live.id}
+                    style={styles.myAdCell}
+                    onPress={() => handleOpenLiveReplay(live)}
+                    onLongPress={() => setLiveSheetTarget(live)}
+                  >
+                    {live.posterUrl ? (
+                      <Image source={{ uri: cldOptimized(live.posterUrl) }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                    ) : (
+                      <View style={[StyleSheet.absoluteFill, { backgroundColor: "#111827", alignItems: "center", justifyContent: "center" }]}>
+                        <Text style={{ fontSize: 26 }}>🎬</Text>
+                      </View>
+                    )}
+                    {live.recordingStatus === "processing" && (
+                      <View style={styles.processingBadge}><Text style={styles.processingBadgeText}>{t("جارٍ المعالجة")}</Text></View>
+                    )}
+                    {live.recordingStatus === "failed" && (
+                      <View style={styles.failedBadge}><Text style={styles.processingBadgeText}>{t("فشل التسجيل")}</Text></View>
+                    )}
+                    {(live.recordingStatus === "ready" || !!live.recordingUrl) && (
+                      <View style={styles.playIconWrap}>
+                        <Svg width={22} height={22} viewBox="0 0 24 24" fill="white"><Path d="M8 5v14l11-7z" /></Svg>
+                      </View>
+                    )}
+                    {live.pinned && (
+                      <View style={styles.pinnedBadge}>
+                        <Svg width={10} height={10} viewBox="0 0 24 24" fill="white"><Path d="M12 17v5M9 10.76V6a2 2 0 012-2h2a2 2 0 012 2v4.76a2 2 0 00.4 1.2L18 15H6l2.6-3.04a2 2 0 00.4-1.2z" /></Svg>
+                      </View>
+                    )}
+                    {live.publishedPublic && (
+                      <View style={styles.publicBadge}>
+                        <Text style={styles.publicBadgeText}>{t("عام")}</Text>
+                      </View>
+                    )}
+                    <View style={styles.adPriceTag}>
+                      <Text style={styles.adPriceTagText} numberOfLines={1}>{t(live.title)}</Text>
+                    </View>
+                    <Pressable
+                      style={styles.adMoreBtn}
+                      onPress={(e) => { e.stopPropagation(); setLiveSheetTarget(live); }}
+                      hitSlop={6}
+                    >
+                      <Svg width={14} height={14} viewBox="0 0 24 24" fill="white">
+                        <Circle cx={12} cy={5} r={1.8} /><Circle cx={12} cy={12} r={1.8} /><Circle cx={12} cy={19} r={1.8} />
+                      </Svg>
+                    </Pressable>
+                  </Pressable>
+                ))}
+              </View>
+            )
+          )}
+
+          {activeTab === "favorites" && (
+            favProps.length === 0 && favReqs.length === 0 ? (
+              <EmptyState
+                icon={<Svg width={56} height={56} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth={1.5}><Path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" /></Svg>}
+                title="لا توجد عناصر في المفضلة"
+              />
+            ) : (
+              <View>
+                {favProps.length > 0 && (
+                  <>
+                    <Text style={styles.sectionLabel}>🏠 {isEn ? "Listings" : t("إعلان")} ({favProps.length})</Text>
+                    {favProps.map((p) => (
+                      <Pressable key={p.id} style={styles.favCard} onPress={() => router.push(`/property/${p.id}`)}>
+                        <View style={styles.favCardTop}>
+                          <Text style={styles.favCardTitle} numberOfLines={1}>{p.shortTitle || p.title}</Text>
+                          <Text style={styles.favCardPrice}>{fmtPrice(p.price)} {t("ج.م")} {p.purpose === "rent" ? t("/ شهر") : ""}</Text>
+                        </View>
+                        <Text style={styles.favCardLoc}>📍 {p.province} · {p.location}</Text>
+                        <Pressable style={styles.removeBtn} onPress={(e) => { e.stopPropagation(); setPendingRemoval({ kind: "favProperty", id: p.id }); }}>
+                          <Text style={styles.removeBtnText}>⭐ {t("إزالة من المفضلة")}</Text>
+                        </Pressable>
+                      </Pressable>
+                    ))}
+                  </>
+                )}
+                {favReqs.length > 0 && (
+                  <>
+                    <Text style={[styles.sectionLabel, { marginTop: 16 }]}>📋 {t("الطلبات")} ({favReqs.length})</Text>
+                    {favReqs.map((r) => (
+                      <View key={r.id} style={styles.favCard}>
+                        <View style={styles.favCardTop}>
+                          <Text style={styles.favCardTitle}>{t(r.type)} {r.purpose === "sale" ? t("للبيع") : t("للإيجار")}</Text>
+                          <Text style={styles.favCardPrice}>{t("حتى")} {r.priceMax ? fmtPrice(r.priceMax) : "—"} {t("ج.م")}</Text>
+                        </View>
+                        <Text style={styles.favCardLoc}>📍 {r.province} · {r.location}</Text>
+                        <Pressable style={styles.removeBtn} onPress={() => setPendingRemoval({ kind: "favRequest", id: r.id })}>
+                          <Text style={styles.removeBtnText}>⭐ {t("إزالة من المفضلة")}</Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                  </>
+                )}
+              </View>
+            )
+          )}
+
+          {activeTab === "drafts" && (
+            drafts.length === 0 ? (
+              <EmptyState
+                icon={<Svg width={56} height={56} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth={1.5}><Path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></Svg>}
+                title="لا توجد مسودات"
+                subtitle="لو بدأت إعلان أو طلب ومكملتوش، احفظه كمسودة عشان ترجعله بعدين"
+              />
+            ) : (
+              <View>
+                {drafts.map((d) => (
+                  <View key={d.id} style={styles.favCard}>
+                    <View style={styles.favCardTop}>
+                      <Text style={styles.favCardTitle} numberOfLines={1}>
+                        {d.title || (d.draftType === "listing" ? t("مسودة إعلان") : t("مسودة طلب"))}
+                      </Text>
+                      <Text style={styles.favCardPrice}>{d.draftType === "listing" ? (isEn ? "Listing" : t("إعلان")) : t("طلب")}</Text>
+                    </View>
+                    <Text style={styles.favCardLoc}>
+                      {t("آخر تعديل")}: {new Date(d.updatedAt).toLocaleDateString(isEn ? "en-US" : "ar-EG")}
+                    </Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                      <Pressable
+                        style={[styles.removeBtn, { flex: 1, backgroundColor: "#ecfdf5" }]}
+                        onPress={() => router.push({
+                          pathname: d.draftType === "listing" ? "/publish/create-listing" : "/publish/create-request",
+                          params: { draftId: d.id }
+                        })}
+                      >
+                        <Text style={[styles.removeBtnText, { color: "#22A652" }]}>✏️ {t("استكمال التحرير")}</Text>
+                      </Pressable>
+                      <Pressable style={styles.removeBtn} onPress={() => setPendingRemoval({ kind: "draft", id: d.id })}>
+                        <Text style={styles.removeBtnText}>🗑️ {t("حذف")}</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )
+          )}
+        </View>
+      </ScrollView>
+
+      <Modal visible={bioModalVisible} transparent animationType="fade" onRequestClose={() => setBioModalVisible(false)}><KeyboardAvoid style={{ flex: 1 }} mode="center">
+        <Pressable style={styles.bioBackdrop} onPress={() => setBioModalVisible(false)} />
+        <View style={styles.bioModal}>
+          <Text style={styles.bioModalTitle}>{t("نبذة عنك")}</Text>
+          <TextInput
+            style={styles.bioInput}
+            value={bioDraft}
+            onChangeText={setBioDraft}
+            placeholder={t("اكتب نبذة قصيرة...")}
+            placeholderTextColor={themeColors.textSubtle}
+            multiline
+            maxLength={150}
+          />
+          <Pressable style={styles.bioSaveBtn} onPress={() => { void saveBio(); }} disabled={bioSaving}>
+            {bioSaving ? <ActivityIndicator color="white" /> : <Text style={styles.bioSaveBtnText}>{t("حفظ")}</Text>}
+          </Pressable>
+        </View>
+      </KeyboardAvoid></Modal>
+
+      <NotificationsDropdown
+        visible={notifMenuVisible}
+        onClose={() => setNotifMenuVisible(false)}
+        filter={notifications.filter}
+        onSetFilter={notifications.setFilter}
+        items={notifications.visibleItems}
+        onMarkAllRead={notifications.markAllRead}
+        onItemPress={(index) => {
+          const item = notifications.visibleItems[index];
+          notifications.markItemRead(notifications.activeCat, index);
+          setNotifMenuVisible(false);
+          openNotificationItem(item);
+        }}
+      />
+
+      <AdActionSheet
+        visible={!!adSheetTarget}
+        ad={adSheetTarget}
+        pinnedCount={pinnedAdsCount}
+        onClose={() => setAdSheetTarget(null)}
+      />
+      <ConfirmModal
+        visible={!!pendingRemoval}
+        title={removalCopy.title}
+        text={removalCopy.text}
+        confirmLabel={removalCopy.confirm}
+        danger
+        onCancel={() => setPendingRemoval(null)}
+        onConfirm={confirmRemoval}
+      />
+      <LiveActionSheet visible={!!liveSheetTarget} live={liveSheetTarget} onClose={() => setLiveSheetTarget(null)} />
+    </View>
+  );
+}
+
+function AdsIcon({ color }: { color: string }) {
+  return <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}><Rect x={3} y={3} width={18} height={18} rx={2} /><Path d="M3 9h18M9 21V9" /></Svg>;
+}
+function RequestsIcon({ color }: { color: string }) {
+  return <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}><Path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" /><Rect x={9} y={3} width={6} height={4} rx={1} /></Svg>;
+}
+function LivesIcon({ color }: { color: string }) {
+  return <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}><Rect x={2} y={7} width={20} height={14} rx={2} /><Path d="M8 2l4 4 4-4" /></Svg>;
+}
+function FavIcon({ color }: { color: string }) {
+  return <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}><Path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z" /></Svg>;
+}
+function DraftsIcon({ color }: { color: string }) {
+  return <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}><Path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></Svg>;
+}
+
+function TabBtn({
+  active, label, count, icon: Icon, onPress,
+}: { active: boolean; label: string; count: number; icon: (props: { color: string }) => React.ReactElement; onPress: () => void }) {
+  const { t } = useLanguage();
+  const themeColors = useThemeColors();
+  const styles = createStyles(themeColors);
+  return (
+    <Pressable style={[styles.tab, active && styles.tabActive]} onPress={onPress}>
+      <Icon color={active ? "#22A652" : themeColors.textSubtle} />
+      <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{t(label)}</Text>
+      <Text style={[styles.tabCount, active && styles.tabCountActive]}>{count}</Text>
+    </Pressable>
+  );
+}
+
+function EmptyState({ icon, title, subtitle, actionLabel, onAction }: { icon: React.ReactNode; title: string; subtitle?: string; actionLabel?: string; onAction?: () => void }) {
+  const { t } = useLanguage();
+  const themeColors = useThemeColors();
+  const styles = createStyles(themeColors);
+  return (
+    <View style={styles.emptyState}>
+      {icon}
+      <Text style={styles.emptyTitle}>{t(title)}</Text>
+      {!!subtitle && <Text style={styles.emptySubtitle}>{t(subtitle)}</Text>}
+      {!!actionLabel && (
+        <Pressable style={styles.emptyActionBtn} onPress={onAction}>
+          <Text style={styles.emptyActionBtnText}>{t(actionLabel)}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+function createStyles(themeColors: ThemeColors) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: themeColors.background },
+    profileHeader: { alignItems: "center", paddingTop: 24, paddingBottom: 12 },
+    avatar: { width: 84, height: 84, borderRadius: 42, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center", overflow: "hidden", position: "relative" },
+    avatarText: { color: "white", fontWeight: "900", fontSize: 30 },
+    avatarEditBadge: { position: "absolute", bottom: 2, right: 2, width: 24, height: 24, borderRadius: 12, backgroundColor: "#111827", borderWidth: 2, borderColor: themeColors.background, alignItems: "center", justifyContent: "center" },
+    username: { fontSize: 15, fontWeight: "900", color: themeColors.text, marginTop: 10 },
+    handle: { fontSize: 12, color: themeColors.textSubtle, marginTop: 2 },
+    bioBox: { paddingHorizontal: 24, paddingBottom: 16, alignItems: "center" },
+    bioText: { fontSize: 12.5, color: themeColors.textSubtle, textAlign: "center" },
+    tabs: { flexDirection: "row", borderTopWidth: 1, borderBottomWidth: 1, borderColor: themeColors.border },
+    tab: { flex: 1, alignItems: "center", gap: 4, paddingVertical: 12 },
+    tabActive: { borderBottomWidth: 3, borderBottomColor: "#22A652" },
+    tabLabel: { fontSize: 11, fontWeight: "900", color: themeColors.textSubtle },
+    tabLabelActive: { color: "#22A652" },
+    tabCount: { fontSize: 10, backgroundColor: themeColors.surface, color: themeColors.textSubtle, paddingVertical: 1, paddingHorizontal: 8, borderRadius: 999, overflow: "hidden" },
+    tabCountActive: { backgroundColor: themeColors.isDark ? "rgba(34,166,82,0.22)" : "#E8F7EE", color: "#22A652" },
+    content: { padding: 16, minHeight: 300 },
+    emptyState: { alignItems: "center", paddingTop: 50, gap: 10 },
+    emptyTitle: { fontSize: 14, fontWeight: "900", color: themeColors.textMuted },
+    emptySubtitle: { fontSize: 12, color: themeColors.textSubtle, textAlign: "center", paddingHorizontal: 20 },
+    emptyActionBtn: { marginTop: 10, backgroundColor: "#22A652", borderRadius: 999, paddingVertical: 10, paddingHorizontal: 20 },
+    emptyActionBtnText: { color: "white", fontWeight: "900", fontSize: 12.5 },
+    sectionLabel: { fontSize: 12, fontWeight: "900", color: themeColors.textSubtle, marginBottom: 8 },
+    myAdsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    myAdCell: { flexBasis: "31%", aspectRatio: 0.8, borderRadius: 10, overflow: "hidden", backgroundColor: themeColors.surface },
+    adPurposeBadge: { position: "absolute", top: 6, right: 6, borderRadius: 999, paddingVertical: 2, paddingHorizontal: 6 },
+    adPurposeBadgeText: { color: "white", fontSize: 8.5, fontWeight: "900" },
+    adPriceTag: { position: "absolute", bottom: 6, left: 6, right: 6, backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 6, paddingVertical: 3, paddingHorizontal: 6 },
+    adPriceTagText: { color: "white", fontSize: 9.5, fontWeight: "900", textAlign: "center" },
+    adMoreBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(0,0,0,0.55)", alignItems: "center", justifyContent: "center" },
+    // نفس مسافات شبكة البحث وصفحة المعلن (حشو 14 وفاصل 10) — content هنا حشوه 16 فبنقلّله 2.
+    adsGrid: { gap: 10, marginHorizontal: -2 },
+    adsRow: { flexDirection: "row", gap: 10 },
+    pinHint: { fontSize: 11.5, color: themeColors.textSubtle, fontWeight: "700", marginBottom: 8, textAlign: "left" },
+    adStatusBadge: { borderRadius: 999, paddingVertical: 3, paddingHorizontal: 7, backgroundColor: "#D97706" },
+    adStatusBadgeRejected: { backgroundColor: "#B91C1C" },
+    adStatusBadgeClosed: { backgroundColor: "#15803D" },
+    adStatusBadgeText: { color: "white", fontSize: 8.5, fontWeight: "900" },
+    pinnedBadge: { width: 22, height: 22, borderRadius: 11, backgroundColor: "#22A652", alignItems: "center", justifyContent: "center" },
+    publicBadge: { position: "absolute", top: 6, right: 6, backgroundColor: "#3b82f6", borderRadius: 999, paddingVertical: 2, paddingHorizontal: 6 },
+    publicBadgeText: { color: "white", fontSize: 8.5, fontWeight: "900" },
+    processingBadge: { position: "absolute", top: 6, left: 6, backgroundColor: "rgba(217,119,6,0.9)", borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 },
+    failedBadge: { position: "absolute", top: 6, left: 6, backgroundColor: "rgba(239,68,68,0.9)", borderRadius: 6, paddingVertical: 2, paddingHorizontal: 6 },
+    processingBadgeText: { color: "white", fontSize: 8, fontWeight: "900" },
+    playIconWrap: { position: "absolute", top: "50%", left: "50%", marginTop: -14, marginLeft: -14, width: 28, height: 28, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
+    favCard: { backgroundColor: themeColors.card, borderRadius: 14, padding: 14, marginBottom: 12 },
+    favCardTop: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+    favCardTitle: { flex: 1, fontSize: 13, fontWeight: "900", color: themeColors.text },
+    favCardPrice: { fontSize: 12.5, fontWeight: "900", color: "#22A652" },
+    favCardLoc: { fontSize: 11.5, color: themeColors.textSubtle, marginBottom: 10 },
+    removeBtn: { backgroundColor: themeColors.isDark ? "rgba(239,68,68,0.18)" : "#FEE2E2", borderRadius: 10, paddingVertical: 9, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },
+    requestWindowNote: { fontSize: 11, lineHeight: 17, color: themeColors.textSubtle, marginTop: 4 },
+    removeBtnText: { color: themeColors.isDark ? "#FCA5A5" : "#991B1B", fontSize: 11.5, fontWeight: "900" },
+    bioBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
+    bioModal: { position: "absolute", left: 20, right: 20, top: "35%", backgroundColor: themeColors.card, borderRadius: 16, padding: 18 },
+    bioModalTitle: { fontSize: 14, fontWeight: "900", color: themeColors.text, marginBottom: 10 },
+    bioInput: { backgroundColor: themeColors.surface, borderRadius: 10, padding: 12, fontSize: 13, color: themeColors.text, minHeight: 80, textAlignVertical: "top" },
+    bioSaveBtn: { marginTop: 14, backgroundColor: "#22A652", borderRadius: 999, paddingVertical: 12, alignItems: "center" },
+    bioSaveBtnText: { color: "white", fontWeight: "900", fontSize: 13 },
+  });
+}
