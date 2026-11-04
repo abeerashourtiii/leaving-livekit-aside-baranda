@@ -1,5 +1,0 @@
-# ↔ Cloudflare Pages (يُستخدم مع `wrangler pages deploy` أو تكامل Git): المجلد الجاهز للنشر = docs/
-# الخطوات الكاملة: diarino-app/docs/cloudflare-setup.md
-name = "baranda-shop"
-pages_build_output_dir = "docs"
-compatibility_date = "2026-10-01"
