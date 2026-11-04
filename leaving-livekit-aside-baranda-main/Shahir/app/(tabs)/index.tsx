@@ -1,0 +1,491 @@
+import { useOffersTopBar } from "../../lib/hooks/useOffersTopBar";
+import { buildReelLink } from "../../lib/shareLinks";
+import { FILTER_RESET_AFTER_MS, peekResumeReel, saveResumeReel, shouldRestoreReelNow } from "../../lib/sessionRestore";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { openNotificationItem } from "../../lib/notificationNavigation";
+import { router } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
+import { View, FlatList, StyleSheet, ViewToken, Share, ListRenderItemInfo, AppState, NativeSyntheticEvent, NativeScrollEvent } from "react-native";
+import { usePaginatedProperties, usePropertiesByIds, PropertyPageFilters } from "../../lib/hooks/useProperties";
+import { fmtPrice } from "../../lib/types";
+import { ReelCard } from "../../components/reel/ReelCard";
+import { ReelsHeader } from "../../components/reel/ReelsHeader";
+import { ReelFilterModal, ReelFilter } from "../../components/reel/ReelFilterModal";
+import { NotificationsDropdown } from "../../components/notifications/NotificationsDropdown";
+import { useNotifications } from "../../lib/hooks/useNotifications";
+import { useFavorites } from "../../lib/hooks/useFavorites";
+import { useFollows } from "../../lib/hooks/useFollows";
+import { useLikes } from "../../lib/hooks/useLikes";
+import { useCompareSelection } from "../../lib/hooks/useCompareSelection";
+import { showToast } from "../../components/shared/Toast";
+import { useActiveSponsoredReels, useIncrementSponsoredReach } from "../../lib/hooks/useSponsoredReels";
+import { matchesLocationFilter } from "../../lib/sponsorMatch";
+import { ReportModal } from "../../components/shared/ReportModal";
+import { ReelOptionsSheet } from "../../components/reel/ReelOptionsSheet";
+import { useLanguage } from "../../lib/hooks/useLanguage";
+import { Property } from "../../lib/types";
+import { useReelHeight } from "../../lib/uiConstants";
+import { reelPagingProps } from "../../lib/reelPaging";
+import { SnapCell } from "../../components/reel/SnapCell";
+import { isPiPActive, usePiPActive } from "../../lib/pipState";
+import { useReelPreferences } from "../../lib/hooks/useReelPreferences";
+import { useReelSheetLocked } from "../../lib/reelSheetLock";
+import { prefetchReelPosters } from "../../lib/reelPrefetch";
+
+// ↔ نافذة التحميل: بيتجهّز (player فيديو + بوستر + بيانات) 3 ريلز قبل الريل الشغّال و3 بعده بالظبط — مش كل الريلز.
+// أى ريل برّه النافذة دى بيتفك تمامًا (مفيش player ولا ذاكرة)، وكل ما الريل النشط يتغيّر النافذة بتتحرك معاه.
+// لو ظهر ضغط ذاكرة/تهنيج على أجهزة ضعيفة جدًا قلّل القيمتين (مثلًا 2).
+const PRELOAD_AHEAD = 3;
+const PRELOAD_BEHIND = 3;
+
+// ↔ getOrderedReels() sorts by engagementScore then shuffles the rest.
+// Deferred: real engagement-based ordering + shuffle, and the `lives`
+// row prepended to the feed (renderLiveReel) — comes with wiring live
+// discovery into the feed itself (separate from the live screens already built).
+export default function ReelsScreen() {
+  const isFocused = useIsFocused();
+  const reelHeight = useReelHeight();
+  const { t } = useLanguage();
+  // ↔ #4 (تمرير تلقائي): FlatList ref لازم نقدر ننده عليها نتنقل للريل
+  // اللي بعده برمجيًا (scrollToOffset) لما ReelCard يبلّغ onFinished.
+  const flatListRef = useRef<FlatList<Property>>(null);
+  const { autoAdvance } = useReelPreferences();
+  // ↔ لوحة التعليقات مفتوحة جوه ReelCard => تمرير قائمة الريلز متعطّل (lib/reelSheetLock.ts).
+  const commentsLocked = useReelSheetLocked();
+
+  // ↔ reelProvinceFilters / reelRegionFilters
+  const [filter, setFilter] = useState<ReelFilter>({ provinces: [], regions: [] });
+  const clearFilter = useCallback(() => setFilter({ provinces: [], regions: [] }), []);
+  // ↔ إعادة تعيين الفلتر تلقائيًا عند الخروج من التطبيق (الخلفية). الفلتر محفوظ فى الذاكرة فقط (ليس على الجهاز أو الخادم)،
+  // فبيتصفّر كمان لما التطبيق يتقفل تمامًا. استثناء: أثناء نافذة PiP ما نغيّرش القائمة اللى بيتفرج عليها المستخدم.
+  // ↔ استئناف من حيث توقف: الفلتر ما بيتصفّرش بمجرد الخروج من التطبيق؛ بيتصفّر بس لو غاب المستخدم أكتر من FILTER_RESET_AFTER_MS
+  // (lib/sessionRestore.ts) — فلما يرجع بعد دقائق يلاقى نفس القائمة والريل اللى كان فيه.
+  useEffect(() => {
+    let leftAt = 0;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" && !isPiPActive()) {
+        leftAt = Date.now();
+      } else if (state === "active" && leftAt) {
+        const away = Date.now() - leftAt;
+        leftAt = 0;
+        if (away > FILTER_RESET_AFTER_MS) clearFilter();
+      }
+    });
+    return () => sub.remove();
+  }, [clearFilter]);
+
+  // ↔ real pagination (agreed plan) — filtering by province/region now
+  // happens server-side; useProperties() (the unbounded/capped list) is
+  // no longer used here on purpose. See usePropertiesByIds below for how
+  // sponsored-reel injection still works without needing the full list.
+  const pageFilters: PropertyPageFilters = useMemo(
+    () => ({ provinces: filter.provinces, regions: filter.regions }),
+    [filter]
+  );
+  const { data, isFetchingNextPage, hasNextPage, fetchNextPage } = usePaginatedProperties(pageFilters);
+  const filteredProperties = useMemo(() => data?.pages.flat() ?? [], [data]);
+
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  // ↔ #1/#2/#3: تفاصيل العقار بقت لوحة (bottom sheet) تفتح جوه شاشة
+  // الريلز نفسها بدل الانتقال لصفحة تانية — عشان الريل يفضل شغال ومسموع
+  // وهو متصغّر لفوق أثناء عرضها (نفس فكرة تعليقات يوتيوب شورتس). بنخزن
+  // بس الـ id لأن الكارت النشط هو الوحيد المفروض يقدر يفتحها.
+  const [detailsOpenId, setDetailsOpenId] = useState<string | null>(null);
+
+  // ↔ state.followedSellers — now the real `follows` table (shared with
+  // app/seller/[id].tsx's follow button instead of two separate local states).
+  const { followedIds, toggleFollow } = useFollows();
+  const { favoriteProperties, toggleFavoriteProperty } = useFavorites();
+  const { likedIds, toggleLike } = useLikes();
+  const compareSelection = useCompareSelection();
+
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+  const [notifMenuVisible, setNotifMenuVisible] = useState(false);
+  const notifications = useNotifications();
+  // ↔ أيقونة «العروض» جنب جرس الإشعارات + نقطتها الحمراء (منفصلة عن الجرس).
+  const offersBar = useOffersTopBar();
+
+  // ↔ long-press on a reel's info card → quick "الإبلاغ عن هذا الريل"
+  // (reason only, no link) — lands in the admin support center's
+  // "الإبلاغات" tab alongside the full-link report from /property/[id].
+  const [reportSheetProperty, setReportSheetProperty] = useState<Property | null>(null);
+  const [reportModalProperty, setReportModalProperty] = useState<Property | null>(null);
+
+  // ↔ admin "الريلز المميزة" feature — an intro reel shown first on a
+  // fresh (unfiltered) entry into the feed, plus featured reels inserted
+  // periodically while browsing. Both reuse a REAL existing listing —
+  // usePropertiesByIds fetches just those specific sponsor properties
+  // directly (they may not be on whichever page is currently loaded, now
+  // that the full list isn't fetched anymore) — sponsoredIdByPropertyId
+  // lets the viewability tracker below know which feed position to bump
+  // reach for.
+  const { data: sponsoredReels } = useActiveSponsoredReels();
+  const incrementReach = useIncrementSponsoredReach();
+  const sponsorPropertyIds = useMemo(
+    () => [...new Set((sponsoredReels ?? []).map((s) => s.propertyId))],
+    [sponsoredReels]
+  );
+  const { data: sponsorProperties } = usePropertiesByIds(sponsorPropertyIds);
+
+  const { feedItems, sponsoredIdByPropertyId } = useMemo(() => {
+    const byId = new Map((sponsorProperties ?? []).map((p) => [p.id, p]));
+    // ↔ الافتتاحي الأحدث أولًا (sponsoredReels مرتبة من الأحدث) وحسب الفئة المستهدفة وهدف الوصول (متحقق منهما فى useActiveSponsoredReels).
+    //   عند الفلترة بمحافظة/منطقة يظهر فقط الافتتاحي الواقع فيها؛ ولو عقاره خارج الفلتر لا يظهر. وبعد بلوغ هدف الوصول يخرج من القائمة
+    //   الممولة فيرجع إعلانًا عاديًا يظهر أثناء التصفح مع باقي الريلز.
+    const inFilter = (propertyId: string) => {
+      const p = byId.get(propertyId);
+      return !!p && matchesLocationFilter(p, filter.provinces, filter.regions);
+    };
+    const introSponsor = sponsoredReels?.find((s) => s.placement === "intro" && inFilter(s.propertyId));
+    const inFeedSponsors = sponsoredReels?.filter((s) => s.placement === "in_feed" && inFilter(s.propertyId)) ?? [];
+
+    const sponsoredIdByPropertyId = new Map<string, string>();
+    let items = [...filteredProperties];
+
+    if (introSponsor) {
+      const introProperty = byId.get(introSponsor.propertyId);
+      if (introProperty) {
+        items = items.filter((p) => p.id !== introProperty.id);
+        items.unshift(introProperty);
+        sponsoredIdByPropertyId.set(introProperty.id, introSponsor.id);
+      }
+    }
+
+    const FEATURED_EVERY = 6;
+    inFeedSponsors.forEach((sponsor, sIdx) => {
+      const sponsorProperty = byId.get(sponsor.propertyId);
+      if (!sponsorProperty) return;
+      const insertAt = Math.min(items.length, FEATURED_EVERY * (sIdx + 1));
+      items = items.filter((p) => p.id !== sponsorProperty.id);
+      items.splice(insertAt, 0, sponsorProperty);
+      sponsoredIdByPropertyId.set(sponsorProperty.id, sponsor.id);
+    });
+
+    return { feedItems: items, sponsoredIdByPropertyId };
+  }, [filteredProperties, sponsorProperties, sponsoredReels, filter.provinces, filter.regions]);
+
+  // ↔ سرعة التنقل (الإصلاح الأهم): قبل كده handleOpenDetails/handleReelFinished
+  // كانوا بيعتمدوا على activeIndex، وuseCompareSelection() بيرجّع object جديد
+  // فى كل render، وuseLikes().toggleLike دالة جديدة كل مرة — فكل دوال الكروت
+  // كانت بتتغيّر مع كل سحب لريل جديد وReact.memo(ReelCard) كان بيفشل، يعني
+  // *كل* الكروت المرسومة كانت بتتعمل لها re-render كامل أثناء السحب (تقطيع).
+  // دلوقتي كل الدوال ثابتة (deps فاضية) وبتقرا القيم الحالية من refs، فالسحب
+  // بيعيد رسم الكارتين/التلاتة اللي isActive/isNearActive بتاعتهم اتغيّر بس.
+  const activeIndexRef = useRef(0);
+  activeIndexRef.current = activeIndex;
+
+  // ↔ بعد الرجوع من PiP: نرجّع الـ FlatList لمكان الريل النشط بالظبط (لو الشاشة اتغيّر حجمها فى النافذة
+  // ممكن تكون اتزحزحت).
+  const pipActive = usePiPActive();
+  const wasPiPRef = useRef(false);
+  useEffect(() => {
+    if (wasPiPRef.current && !pipActive) {
+      flatListRef.current?.scrollToOffset({ offset: reelHeight * activeIndexRef.current, animated: false });
+    }
+    wasPiPRef.current = pipActive;
+  }, [pipActive, reelHeight]);
+  const feedItemsRef = useRef<Property[]>([]);
+  feedItemsRef.current = feedItems;
+  const latest = useRef({
+    toggleFollow, toggleFavoriteProperty, toggleLike,
+    compareToggle: compareSelection.toggle, compareMax: compareSelection.max,
+    t, autoAdvance, reelHeight,
+  });
+  latest.current = {
+    toggleFollow, toggleFavoriteProperty, toggleLike,
+    compareToggle: compareSelection.toggle, compareMax: compareSelection.max,
+    t, autoAdvance, reelHeight,
+  };
+  const compareIdSet = useMemo(() => new Set(compareSelection.ids), [compareSelection.ids]);
+
+  // ↔ تغيير/إلغاء الفلتر: نرجع لأول ريل من القائمة الجديدة بدل ما نفضل على مكان قديم.
+  const filterKey = `${filter.provinces.join("|")}#${filter.regions.join("|")}`;
+  const firstFilterKeyRef = useRef(filterKey);
+  useEffect(() => {
+    if (firstFilterKeyRef.current === filterKey) return;
+    firstFilterKeyRef.current = filterKey;
+    activeIndexRef.current = 0;
+    setActiveIndex(0);
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [filterKey]);
+  const filterLabel = useMemo(() => {
+    const p = filter.provinces.length;
+    const r = filter.regions.length;
+    if (!p && !r) return "";
+    const base = p === 1 ? t(filter.provinces[0]) : p > 1 ? `${p} ${t("محافظات")}` : "";
+    const regionsPart = r ? `${r} ${t("منطقة")}` : "";
+    return [base, regionsPart].filter(Boolean).join(" · ");
+  }, [filter, t]);
+
+  // ↔ تحميل مسبق لبوسترات/أول صور الريلز الجاية (كاش expo-image) — فلما
+  // المستخدم يوصلها بتظهر فورًا من غير انتظار شبكة.
+  useEffect(() => {
+    prefetchReelPosters(feedItems, activeIndex - PRELOAD_BEHIND, PRELOAD_AHEAD + PRELOAD_BEHIND + 3);
+  }, [feedItems, activeIndex]);
+
+  // ↔ استئناف من حيث توقف: لو التطبيق اتقتل فى الخلفية ورجع (أو اتفتح خلال المدة المحددة) نرجّع المستخدم لآخر ريل كان فيه
+  // بدل أول ريل (مرة واحدة لكل تشغيل). لو الريل مش فى أول صفحات القائمة بنفضل على الأول. بعد الاستئناف بنحفظ كل ريل جديد يتشاف.
+  const reelRestoreDoneRef = useRef(false);
+  useEffect(() => {
+    if (reelRestoreDoneRef.current || feedItems.length === 0) return;
+    reelRestoreDoneRef.current = true;
+    if (!shouldRestoreReelNow()) return;
+    void peekResumeReel().then((id) => {
+      if (!id) return;
+      const idx = feedItemsRef.current.findIndex((p) => p.id === id);
+      if (idx <= 0) return;
+      activeIndexRef.current = idx;
+      setActiveIndex(idx);
+      setTimeout(() => flatListRef.current?.scrollToOffset({ offset: reelHeight * idx, animated: false }), 80);
+    });
+  }, [feedItems, reelHeight]);
+  useEffect(() => {
+    if (!reelRestoreDoneRef.current) return;
+    const id = feedItems[activeIndex]?.id;
+    if (!id) return;
+    const t = setTimeout(() => { void saveResumeReel(id); }, 600);
+    return () => clearTimeout(t);
+  }, [activeIndex, feedItems]);
+
+  const reachedSponsorIds = useRef(new Set<string>());
+  // onViewableItemsChanged below is frozen at mount (FlatList expects a
+  // stable reference), so anything it needs that changes over time —
+  // sponsoredIdByPropertyId only exists once sponsoredReels has loaded,
+  // and incrementReach comes from a hook — has to be read through a ref
+  // kept up to date here, not captured directly in that closure.
+  const sponsoredMapRef = useRef(sponsoredIdByPropertyId);
+  useEffect(() => { sponsoredMapRef.current = sponsoredIdByPropertyId; }, [sponsoredIdByPropertyId]);
+  const incrementReachRef = useRef(incrementReach);
+  useEffect(() => { incrementReachRef.current = incrementReach; }, [incrementReach]);
+
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    // ↔ أثناء نافذة PiP: تجاهل أى تغيّر فى الريل "المرئي" (النافذة بتصغّر شاشة التطبيق فبيتغيّر اللى
+    // FlatList شايفه) — الريل اللى شغّال فى النافذة هو اللى لازم يفضل نشط.
+    if (isPiPActive()) return;
+    if (viewableItems.length > 0 && viewableItems[0].index != null) {
+      setActiveIndex(viewableItems[0].index);
+      const propertyId = viewableItems[0].item?.id;
+      const sponsorId = propertyId ? sponsoredMapRef.current.get(propertyId) : undefined;
+      if (sponsorId && !reachedSponsorIds.current.has(sponsorId)) {
+        reachedSponsorIds.current.add(sponsorId);
+        incrementReachRef.current.mutate(sponsorId);
+      }
+    }
+  }).current;
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+
+  // ↔ perf audit fix #2: stable, id-parameterized callbacks (useCallback)
+  // shared by every rendered item, instead of a fresh closure per item
+  // per render inside renderItem below. This is what actually lets
+  // React.memo(ReelCard) bail out of re-rendering unaffected cards — if
+  // these were still inline arrow functions capturing `item`, every card
+  // would get a brand-new function reference on every parent re-render
+  // regardless of memo, since a changed prop reference always fails a
+  // shallow-equality check.
+  // ↔ #1: قبل كده كان فتح التفاصيل بيعمل navigation كامل لصفحة تانية —
+  // وده اللي كان بيوقف الريل فعليًا (الشاشة كلها بتتشال). دلوقتي بيفتح
+  // لوحة مصغّرة جوه نفس الشاشة (شوف ReelCard) فالريل يفضل شغال. الشرط
+  // على activeIndex عشان لو حصل تاب على كارت مش هو النشط فعليًا (حافة
+  // نادرة أثناء السحب) يرجع لسلوك التنقل الكامل القديم كحل احتياطى.
+  const handleOpenDetails = useCallback((propertyId: string) => {
+    const tappedIndex = feedItemsRef.current.findIndex((p) => p.id === propertyId);
+    if (tappedIndex === activeIndexRef.current) {
+      setDetailsOpenId(propertyId);
+    } else {
+      router.push(`/property/${propertyId}`);
+    }
+  }, []);
+  const handleCloseDetails = useCallback(() => setDetailsOpenId(null), []);
+  const handleOpenSeller = useCallback((sellerId: string) => router.push(`/seller/${sellerId}`), []);
+  const handleToggleFollow = useCallback((sellerId: string) => latest.current.toggleFollow(sellerId), []);
+  const handleToggleFavorite = useCallback((propertyId: string) => latest.current.toggleFavoriteProperty(propertyId), []);
+  const handleToggleLike = useCallback((propertyId: string) => latest.current.toggleLike(propertyId), []);
+  const handleToggleCompare = useCallback((propertyId: string) => {
+    const { compareToggle, compareMax, t: tr } = latest.current;
+    const result = compareToggle(propertyId);
+    if (result === "full") showToast(tr(`تقدر تقارن حتى ${compareMax} عقارات بس`));
+  }, []);
+  const handleShare = useCallback((property: Property) => {
+    // ↔ shareProperty()/openShareModal() — the original built a custom
+    // share sheet with a copy-link box + social icons. The OS's native
+    // share sheet (Share.share) covers the same job on mobile and is the
+    // more idiomatic pattern here, so we use that instead of reproducing
+    // the custom modal.
+    Share.share({
+      message: `${property.title} — ${fmtPrice(property.price)} ج.م\n${buildReelLink(property.id)}`,
+    });
+  }, []);
+  const handleReport = useCallback((property: Property) => setReportSheetProperty(property), []);
+  // ↔ #4 (تمرير تلقائي): بينتقل للريل اللي بعده أوتوماتيك لما الريل
+  // النشط يخلص (فيديو وصل لنهايته أو سلايدشو خلّص دورة)، بس لو autoAdvance
+  // مفعّل ومفيش ريل بعده يقف عنده (آخر عنصر فى القايمة).
+  const handleReelFinished = useCallback(() => {
+    const { autoAdvance: auto, reelHeight: h } = latest.current;
+    if (!auto) return;
+    const idx = activeIndexRef.current;
+    if (idx >= feedItemsRef.current.length - 1) return;
+    flatListRef.current?.scrollToOffset({ offset: h * (idx + 1), animated: true });
+  }, []);
+
+  const renderItem = useCallback(
+    ({ item, index }: ListRenderItemInfo<Property>) => (
+      <SnapCell height={reelHeight}>
+      <ReelCard
+        property={item}
+        index={index}
+        isActive={isFocused && index === activeIndex}
+        isNearActive={index - activeIndex >= -PRELOAD_BEHIND && index - activeIndex <= PRELOAD_AHEAD}
+        isFollowing={followedIds.has(item.seller.id)}
+        isFavorite={favoriteProperties.has(item.id)}
+        isLiked={likedIds.has(item.id)}
+        isComparing={compareIdSet.has(item.id)}
+        detailsOpen={index === activeIndex && detailsOpenId === item.id}
+        onCloseDetails={handleCloseDetails}
+        onOpenDetails={handleOpenDetails}
+        onOpenSeller={handleOpenSeller}
+        onToggleFollow={handleToggleFollow}
+        onToggleFavorite={handleToggleFavorite}
+        onToggleLike={handleToggleLike}
+        onToggleCompare={handleToggleCompare}
+        onShare={handleShare}
+        onReport={handleReport}
+        onFinished={handleReelFinished}
+      />
+      </SnapCell>
+    ),
+    [
+      // ↔ إصلاح "الريل مش بيقف لما أسيب الصفحة": isFocused كان بيتقرا جوه
+      // renderItem من غير ما يبقى فى الـ deps — فالدالة كانت بتفضل نسخة قديمة
+      // (isFocused = true للأبد) وFlatList (PureComponent) مكانتش بتعيد رسم
+      // الكروت لما الصفحة تفقد التركيز، فالريل يكمّل شغال فى الخلفية بعد
+      // الانتقال للبحث/القائمة/الطلبات/المقارنات. دلوقتي لما isFocused يتغيّر
+      // الدالة بتتجدد (+ extraData تحت) فالكارت النشط بياخد isActive=false
+      // فيقف، وأول ما ترجع بياخد true فيكمّل من نفس النقطة.
+      isFocused, reelHeight,
+      activeIndex, detailsOpenId, followedIds, favoriteProperties, likedIds, compareIdSet,
+      handleCloseDetails, handleOpenDetails, handleOpenSeller, handleToggleFollow,
+      handleToggleFavorite, handleToggleLike, handleToggleCompare, handleShare, handleReport,
+      handleReelFinished,
+    ]
+  );
+
+  const handleMomentumEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (isPiPActive()) return;
+    const h = latest.current.reelHeight;
+    if (!h) return;
+    const idx = Math.max(0, Math.min(feedItemsRef.current.length - 1, Math.round(e.nativeEvent.contentOffset.y / h)));
+    if (idx !== activeIndexRef.current) setActiveIndex(idx);
+  }, []);
+
+  return (
+    <View style={styles.container}>
+      <FlatList
+        ref={flatListRef}
+        data={feedItems}
+        keyExtractor={(p) => p.id}
+        renderItem={renderItem}
+        // ↔ extraData: يضمن إعادة رسم الكروت لما حالة التركيز (isFocused) تتغيّر
+        extraData={isFocused}
+        // ↔ التنقل ريل بريل من غير تخطّى (lib/reelPaging.ts): snapToInterval +
+        // disableIntervalMomentum على الموبايل، وCSS scroll-snap لكل خلية على الويب.
+        {...reelPagingProps(reelHeight)}
+        // ↔ #3: لما لوحة التفاصيل فاتحة، بنقفل سحب الريلز (زي قفل التمرير
+        // فى شاشة الريلز بيوتيوب لما تفتح الكومنتات) بدل ما نسيب المستخدم
+        // يسحب لريل تانى واللوحة لسه فاتحة على ريل مختلف.
+        scrollEnabled={!detailsOpenId && !commentsLocked}
+        showsVerticalScrollIndicator={false}
+        getItemLayout={(_, index) => ({ length: reelHeight, offset: reelHeight * index, index })}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
+        // ↔ real pagination — a full screen-height item means the
+        // default 0.5 (half a viewport) threshold would trigger too
+        // late/early relative to normal scroll speed here; 1.5 screens
+        // out gives the next page time to arrive before it's needed.
+        onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
+        onEndReachedThreshold={1.5}
+        // ↔ perf audit fix #1 — each item is a full-screen video/image;
+        // the default windowSize (21, i.e. ~10 screens above/below) would
+        // keep far more items mounted than this feed ever needs.
+        // windowSize=3 + initialNumToRender=1 caps it to roughly the
+        // active card ± 1, matching isNearActive in ReelCard so a real
+        // <Video> is never allocated for a card that isn't about to
+        // become visible.
+        // ↔ سرعة التنقل: windowSize=5 (الريل النشط ± 2) عشان الكروت اللي
+        // قدامك بشاشتين تكون مرسومة (بوستر + واجهة) قبل ما توصلها — من غير
+        // ده السحب المتتالي السريع كان بيوصل لكارت لسه بيتعمل له render.
+        // الـ player الحقيقي للفيديو لسه بيتعمل بس للكروت القريبة
+        // (PRELOAD_AHEAD/PRELOAD_BEHIND فوق) فتكلفة الذاكرة محدودة.
+        // ↔ windowSize=7 = الريل النشط ± 3 شاشات (نفس نافذة PRELOAD_AHEAD/PRELOAD_BEHIND) — مفيش أكتر من كده بيتركّب.
+        // initialNumToRender=2: عند فتح التطبيق بيترسم ريلين بس، والباقى بيتدرّج لحد حدود النافذة (مش كل القائمة).
+        // ↔ إصلاح «بعض الريلز بتتعطل/بتفضل سودا وانا بتنقل»: شلنا removeClippedSubviews — على أندرويد بيفصل واجهة الريل
+        // (سطح الفيديو) من الشاشة لما يبعد ويرجّعها فاضية/معلّقة لما نرجع له. الذاكرة محكومة بـ windowSize أصلًا.
+        windowSize={7}
+        initialNumToRender={2}
+        maxToRenderPerBatch={3}
+        updateCellsBatchingPeriod={30}
+        removeClippedSubviews={false}
+        // ↔ شبكة أمان: لو حدث "الريل المرئى" (onViewableItemsChanged) ما اتبعتش وإحنا بنسحب بسرعة، نحسب الريل النشط من موضع
+        // التمرير لما الحركة تستقر — فمفيش حالة يبقى فيها ريل ظاهر وهو مش نشط (واقف).
+        onMomentumScrollEnd={handleMomentumEnd}
+      />
+      <ReelsHeader
+        onOpenFilter={() => setFilterModalVisible(true)}
+        onOpenNotifications={() => setNotifMenuVisible(true)}
+        notifBadgeCount={notifications.totalUnread}
+        onOpenOffers={offersBar.onOpenOffers}
+        offersBadge={offersBar.offersBadge}
+        filterLabel={filterLabel}
+        onClearFilter={clearFilter}
+      />
+
+      <ReelFilterModal
+        visible={filterModalVisible}
+        value={filter}
+        onApply={setFilter}
+        onClose={() => setFilterModalVisible(false)}
+      />
+
+      {/* ↔ #4: بتحل محل الـ ActionSheet البسيط اللي كان بس فيه "الإبلاغ
+          عن هذا الريل" — دلوقتي فيها كمان تمرير تلقائي/كتم صوت
+          الخلفية/الترجمة النصية/عرض التطبيق فوق التطبيقات الأخرى. */}
+      <ReelOptionsSheet
+        visible={!!reportSheetProperty}
+        onClose={() => setReportSheetProperty(null)}
+        onOpenReport={() => setReportModalProperty(reportSheetProperty)}
+        hasMusic={!!reportSheetProperty?.music}
+      />
+      <ReportModal
+        visible={!!reportModalProperty}
+        onClose={() => setReportModalProperty(null)}
+        quickMode
+        targetType="property"
+        targetId={reportModalProperty?.id ?? ""}
+        targetTitle={reportModalProperty?.title ?? ""}
+      />
+
+      <NotificationsDropdown
+        visible={notifMenuVisible}
+        onClose={() => setNotifMenuVisible(false)}
+        filter={notifications.filter}
+        onSetFilter={notifications.setFilter}
+        items={notifications.visibleItems}
+        onMarkAllRead={notifications.markAllRead}
+        onItemPress={(index) => {
+          const item = notifications.visibleItems[index];
+          notifications.markItemRead(notifications.activeCat, index);
+          setNotifMenuVisible(false);
+          // ↔ handleNotifClick() — routes by action.type. `chat` has no
+          // destination screen yet, so it's still a TODO; the other three
+          // (reel/seller/property) all resolve to real screens now.
+          openNotificationItem(item);
+        }}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#000" },
+});
