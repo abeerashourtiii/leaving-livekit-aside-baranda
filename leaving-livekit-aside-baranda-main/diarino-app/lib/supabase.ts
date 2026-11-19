@@ -1,9 +1,13 @@
 import "react-native-url-polyfill/auto";
+import { ensureCryptoPolyfill } from "./cryptoPolyfill";
 import { AppState, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { createClient } from "@supabase/supabase-js";
 import { Database } from "../src/types/supabase";
+
+// ↔ crypto.getRandomValues لازم يكون موجود قبل أى عملية auth بـ PKCE (راجع lib/cryptoPolyfill.ts).
+ensureCryptoPolyfill();
 
 const expoExtra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
 const getExpoExtraString = (key: string): string | undefined => {

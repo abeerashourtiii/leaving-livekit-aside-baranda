@@ -4,6 +4,7 @@ import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabase";
+import { ensureCryptoPolyfill } from "../cryptoPolyfill";
 import { queryClient } from "../queryClient";
 import { resetAdminDB } from "./useAdminDB";
 import { clearCompareSelection } from "./useCompareSelection";
@@ -146,6 +147,7 @@ export function getOAuthRedirectUri(): string {
 export async function signInWithGoogle(): Promise<{ error: string | null; cancelled?: boolean }> {
   const isWeb = Platform.OS === "web";
   const redirectUri = getOAuthRedirectUri();
+  ensureCryptoPolyfill(); // PKCE يحتاج crypto.getRandomValues (وإلا «undefined is not a function»)
 
   console.log(`[Auth] Starting Google Sign-In. Platform: ${Platform.OS}, RedirectURI: ${redirectUri}`);
 
@@ -308,6 +310,7 @@ export async function signUpWithEmail(
   email: string, password: string, fullName: string, extraProfile: Record<string, string> = {}
 ): Promise<{ error: string | null; needsEmailConfirmation: boolean; alreadyRegistered?: boolean }> {
   console.log("[Auth] Starting Email Sign-Up...");
+  ensureCryptoPolyfill();
   const { data, error } = await supabase.auth.signUp({
     email: email.trim(),
     password,
@@ -356,6 +359,7 @@ export async function signInWithEmailPassword(
 
 // ↔ إعادة إرسال رابط تفعيل البريد (لو الرسالة ماوصلتش أو انتهت صلاحية الرابط).
 export async function resendSignupConfirmation(email: string): Promise<{ error: string | null }> {
+  ensureCryptoPolyfill();
   const { error } = await supabase.auth.resend({
     type: "signup",
     email: email.trim(),
@@ -373,6 +377,7 @@ export async function resendSignupConfirmation(email: string): Promise<{ error: 
 // الرسالة بتتبعت حتى لو البريد مش مسجّل من غير ما نكشف ده (حماية من تخمين الحسابات). قالب الرسالة: Email Templates ←
 // Reset password (راجع docs/email-signup-setup.md).
 export async function requestPasswordReset(email: string): Promise<{ error: string | null }> {
+  ensureCryptoPolyfill();
   const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: getEmailConfirmRedirectUri() });
   if (error) {
     console.error("[Auth] Password reset request error:", error.message);

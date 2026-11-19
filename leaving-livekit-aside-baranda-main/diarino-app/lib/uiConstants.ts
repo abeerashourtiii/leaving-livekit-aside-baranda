@@ -4,17 +4,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePiPActive } from "./pipState";
 
 // ↔ يعكس بالظبط قيم app/(tabs)/_floating-tab-bar.tsx: `bottom: insets.bottom + 14`
-// و`styles.pill`/`styles.searchCircle`'s `height: 32`. أي شاشة عندها محتوى
+// و`BAR_H = 52` (ارتفاع الشريط الفعلي). ⚠ إصلاح: كانت القيمة هنا 32 (أقل من الارتفاع الحقيقي 52 بـ 20dp)
+// فكانت منطقة لمس شريط الـ seek تتداخل مع شريط المهام السفلي ويصعب سحبه — لازم تفضل مطابقة لـ BAR_H. أي شاشة عندها محتوى
 // عائم (position: absolute) قريب من أسفل الشاشة ولازم مايتغطّاش بشريط
 // المهام العائم لازم تستخدم FLOATING_TAB_BAR_CLEARANCE بدل رقم ثابت
 // عشوائي، عشان لو الشريط اتغيّر مقاسه فى مكان واحد يفضل الحساب هنا صح.
 export const FLOATING_TAB_BAR_MARGIN = 14;
-export const FLOATING_TAB_BAR_HEIGHT = 32;
+export const FLOATING_TAB_BAR_HEIGHT = 52;
 export const FLOATING_TAB_BAR_CLEARANCE = FLOATING_TAB_BAR_MARGIN + FLOATING_TAB_BAR_HEIGHT;
 
 // ↔ #2 (صفحة الريلز): الفجوة الصغيرة بين شريط الـ seek وأعلى شريط المهام
 // العائم — بدونها الشريطين بيبانوا ملزّقين فى بعض من غير أي هامش.
-export const REEL_SEEK_BAR_GAP = 8;
+export const REEL_SEEK_BAR_GAP = 6;
 
 // ↔ إصلاح: كل كارت ريل لازم ياخد ارتفاع الشاشة الكامل بالظبط (fullscreen
 // حقيقي زي تيك توك/ريلز) — مش ارتفاع مُنقّص. قبل كده كان useReelHeight()

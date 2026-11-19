@@ -81,6 +81,14 @@ try {
   console.warn("[LiveKit] registerGlobals() failed at true app entry (index.js):", e);
 }
 
+// ٢-ب) ضمان وجود crypto.getRandomValues (+ subtle.digest) *بعد* registerGlobals (اللى قد يعرّف crypto جزئيًا): بدونها يفشل تسجيل
+// الدخول بجوجل وإنشاء الحساب بالبريد بخطأ «undefined is not a function» (PKCE فى supabase auth) — راجع lib/cryptoPolyfill.ts.
+try {
+  require("./lib/cryptoPolyfill").ensureCryptoPolyfill();
+} catch (e) {
+  console.warn("[CryptoPolyfill] failed at app entry (index.js):", e);
+}
+
 // ٣) دلوقتي بس نسيب المجال لـ expo-router يبدأ شغله — بعد ما كل
 // التسجيلات الحرجة فوق خلصت فعليًا.
 require("expo-router/entry");
