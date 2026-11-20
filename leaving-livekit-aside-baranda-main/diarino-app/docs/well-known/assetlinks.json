@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.diarino.app",
+      "sha256_cert_fingerprints": [
+        "61:9D:70:FA:BA:19:CE:5C:42:A2:BA:AD:CD:5A:8D:72:72:BE:86:0D:56:79:D0:C4:1B:A1:C2:6C:67:7F:3F:29"
+      ]
+    }
+  }
+]

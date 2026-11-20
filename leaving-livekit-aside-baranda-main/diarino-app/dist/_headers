@@ -1,0 +1,39 @@
+# ↔ Cloudflare Pages: رؤوس HTTP (تُنسخ تلقائيًا من public/ إلى dist/ عند `expo export`، وتتنسخ لـ docs/ مع الـ build).
+# ملفات التحقق من الروابط العميقة لازم تتقدّم JSON وبدون redirect (Google Digital Asset Links / Apple Universal Links).
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  Cache-Control: public, max-age=300
+  Access-Control-Allow-Origin: *
+
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+  Cache-Control: public, max-age=300
+
+# ملفات التطبيق المبنية لها hash فى الاسم ← كاش طويل.
+/_expo/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# الصور/الصوت/الفيديو المضمّنة بالتطبيق (أسماؤها بها hash) — تُنتَج مباشرة تحت /media من Metro (scripts/metro-asset-plugin.js، لبناء الويب فقط).
+/media/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# صفحة التطبيق نفسها: دايمًا نسخة جديدة (عشان التحديثات توصل).
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+# ↔ H1 (أمن الويب): (1) منع التضمين فى iframe (clickjacking على لوحة الأدمن وأزرار التأكيد) — مُطبَّق فعليًا: frame-ancestors 'none' + X-Frame-Options.
+#   لا توجد صفحات معاينة تحتاج تضمينًا (دالة functions/ ترجع HTML للبوتات فقط). (2) Permissions-Policy تقيّد الكاميرا/الميكروفون/الموقع على نفس
+#   الموقع (البث المباشر وتحديد الموقع يعملان من نفس الأصل). (3) CSP كاملة بوضع Report-Only: لا تحجب شيئًا بل تُظهر المخالفات فى Console المتصفح؛
+#   اختبر كل شاشات الويب (خريطة، بث، تسجيل دخول Google، رفع وسائط) وراجع المخالفات، ثم انقل السياسة إلى Content-Security-Policy بعد حذف
+#   'unsafe-inline' من script-src إن أمكن وبعد حسم H2 (حذف unpkg من script-src/style-src لو أُدرجت Leaflet فى الحزمة). *.livekit.cloud افتراض: عدّله
+#   إلى مضيف LiveKit الفعلى (EXPO_PUBLIC_LIVEKIT_URL).
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+  Permissions-Policy: camera=(self), microphone=(self), geolocation=(self), payment=(), usb=()
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: blob: https://res.cloudinary.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://unpkg.com https://lh3.googleusercontent.com https://*.supabase.co; media-src 'self' blob: https://res.cloudinary.com https://*.supabase.co; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.cloudinary.com https://res.cloudinary.com https://*.livekit.cloud wss://*.livekit.cloud https://nominatim.openstreetmap.org https://exp.host; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self' https://accounts.google.com
