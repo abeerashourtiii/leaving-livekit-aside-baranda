@@ -2,10 +2,8 @@ import { memo, useCallback, useState } from "react";
 import { View, Text, Pressable, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { Image } from "expo-image";
 import { router, type Href } from "expo-router";
-import Svg, { Path } from "react-native-svg";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors } from "../../lib/hooks/useThemeColors";
-import { useFavorites } from "../../lib/hooks/useFavorites";
 import { useFeaturedAds, type FeaturedAd, type FeaturedFilters } from "../../lib/hooks/useFeaturedAds";
 import { featuredCardThumbnailUrl } from "../../lib/cloudinary";
 import { fmtPrice, type Property } from "../../lib/types";
@@ -27,26 +25,25 @@ export function propertyCategoryLabel(type: string): string {
   return "سكني";
 }
 
+// ↔ عرض الكارت = عرض كارت الشبكة العادية فى البحث (نصف العرض بعد الفاصل) × 1.12 (أكبر منه بـ 12% فقط)، بحد أقصى للشاشات العريضة.
+//   لا توجد أيقونة قلب هنا: الإعجاب/المفضلة من داخل شاشة الريل عند فتح الإعلان.
+export function featuredCardWidth(viewportWidth: number): number {
+  return Math.max(150, Math.min(230, Math.round(((viewportWidth - 10) / 2) * 1.12)));
+}
+
 type Props = { filters?: FeaturedFilters; style?: StyleProp<ViewStyle> };
 
 export function FeaturedAdsStrip({ filters, style }: Props) {
   const { t } = useLanguage();
   const themeColors = useThemeColors();
   const { ads } = useFeaturedAds(filters);
-  const { favoriteProperties, toggleFavoriteProperty } = useFavorites();
   const [open, setOpen] = useState<FeaturedAd | null>(null);
 
   const renderItem = useCallback(
     (ad: FeaturedAd, width: number) => (
-      <FeaturedAdCard
-        ad={ad}
-        width={width}
-        isFavorite={favoriteProperties.has(ad.property.id)}
-        onToggleFavorite={() => toggleFavoriteProperty(ad.property.id)}
-        onOpen={() => setOpen(ad)}
-      />
+      <FeaturedAdCard ad={ad} width={width} onOpen={() => setOpen(ad)} />
     ),
-    [favoriteProperties, toggleFavoriteProperty]
+    []
   );
 
   if (ads.length === 0) return open ? (
@@ -65,7 +62,7 @@ export function FeaturedAdsStrip({ filters, style }: Props) {
         </Pressable>
       </View>
 
-      <AutoCarousel items={ads} keyOf={(a) => a.reelId} renderItem={renderItem} itemWidth={(vw) => Math.min(330, Math.round(vw * 0.78))} gap={12} />
+      <AutoCarousel items={ads} keyOf={(a) => a.reelId} renderItem={renderItem} itemWidth={featuredCardWidth} gap={10} />
 
       <SponsoredAdReelModal property={open?.property ?? null} sponsoredReelId={open?.reelId} onClose={() => setOpen(null)} />
     </View>
@@ -73,18 +70,16 @@ export function FeaturedAdsStrip({ filters, style }: Props) {
 }
 
 // ↔ كارت إعلان مميز (يُستخدم أيضًا فى شاشة «عرض الكل» عبر الـ export).
-export const FeaturedAdCard = memo(function FeaturedAdCard({ ad, width, isFavorite, onToggleFavorite, onOpen }: {
+export const FeaturedAdCard = memo(function FeaturedAdCard({ ad, width, onOpen }: {
   ad: FeaturedAd;
   width: number;
-  isFavorite: boolean;
-  onToggleFavorite: () => void;
   onOpen: () => void;
 }) {
   const { t } = useLanguage();
   const themeColors = useThemeColors();
   const p: Property = ad.property;
   const thumb = featuredCardThumbnailUrl(p);
-  const mediaH = Math.round(width * 0.6);
+  const mediaH = Math.round(width * 0.68);
   return (
     <Pressable style={[styles.card, { backgroundColor: themeColors.card, width }]} onPress={onOpen} accessibilityRole="button" accessibilityLabel={p.title}>
       <View style={{ height: mediaH }}>
@@ -101,24 +96,13 @@ export const FeaturedAdCard = memo(function FeaturedAdCard({ ad, width, isFavori
         <View style={styles.featuredBadge}>
           <Text style={styles.featuredBadgeText}>★ {t("مميز")}</Text>
         </View>
-        <Pressable
-          style={styles.heart}
-          onPress={(e) => { e.stopPropagation(); onToggleFavorite(); }}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={t("المفضلة")}
-        >
-          <Svg width={22} height={22} viewBox="0 0 24 24" fill={isFavorite ? "#E11D48" : "none"} stroke={isFavorite ? "#E11D48" : "#1D6FD8"} strokeWidth={2.2} strokeLinejoin="round">
-            <Path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 5 6.4 5c2 0 3.5 1 4.6 2.6C12.1 6 13.6 5 15.6 5 19 5 21.1 8.4 19.6 11.8 17.5 16.4 12 21 12 21z" />
-          </Svg>
-        </Pressable>
       </View>
 
       <View style={styles.info}>
         <Text style={styles.category}>{t(propertyCategoryLabel(p.type))}</Text>
-        <Text style={[styles.cardTitle, { color: themeColors.text }]} numberOfLines={2}>{p.shortTitle?.trim() || p.title?.trim() || t(p.type)}</Text>
+        <Text style={[styles.cardTitle, { color: themeColors.text }]} numberOfLines={2} ellipsizeMode="tail">{p.shortTitle?.trim() || p.title?.trim() || t(p.type)}</Text>
         <Text style={[styles.location, { color: themeColors.textSubtle }]} numberOfLines={1}>{formatLocationLine(p.province, p.location, t)}</Text>
-        <Text style={styles.price}>
+        <Text style={styles.price} numberOfLines={1}>
           {fmtPrice(p.price)} <Text style={styles.priceUnit}>{t("جنيه")}{p.purpose === "rent" ? ` ${t("/ شهر")}` : ""}</Text>
         </Text>
         <View style={[styles.divider, { backgroundColor: themeColors.border }]} />
@@ -133,27 +117,26 @@ export const FeaturedAdCard = memo(function FeaturedAdCard({ ad, width, isFavori
 });
 
 const styles = StyleSheet.create({
-  wrap: { marginTop: 14, marginBottom: 8, paddingHorizontal: 14 },
-  header: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 10, gap: 12 },
-  eyebrow: { color: "#18B26B", fontSize: 13, fontWeight: "800", marginBottom: 2 },
-  title: { fontSize: 22, fontWeight: "900" },
-  viewAll: { color: "#1D6FD8", fontSize: 14, fontWeight: "800", paddingBottom: 4 },
+  wrap: { marginTop: 12, marginBottom: 6, paddingHorizontal: 14 },
+  header: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 8, gap: 12 },
+  eyebrow: { color: "#18B26B", fontSize: 12, fontWeight: "800", marginBottom: 1 },
+  title: { fontSize: 19, fontWeight: "900" },
+  viewAll: { color: "#1D6FD8", fontSize: 13, fontWeight: "800", paddingBottom: 3 },
   card: {
-    borderRadius: 18, overflow: "hidden", marginBottom: 6,
-    shadowColor: "#1E3A8A", shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3,
+    borderRadius: 14, overflow: "hidden", marginBottom: 6,
+    shadowColor: "#1E3A8A", shadowOpacity: 0.1, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2,
   },
-  payBadge: { position: "absolute", top: 10, right: 10, backgroundColor: "rgba(15,32,68,0.92)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 5 },
-  payBadgeText: { color: "white", fontSize: 13, fontWeight: "800" },
-  featuredBadge: { position: "absolute", bottom: 10, right: 10, backgroundColor: "rgba(217,119,6,0.95)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  featuredBadgeText: { color: "white", fontSize: 11, fontWeight: "900" },
-  heart: { position: "absolute", top: 10, left: 10, width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(255,255,255,0.95)", alignItems: "center", justifyContent: "center" },
-  info: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12 },
-  category: { color: "#1D6FD8", fontSize: 14, fontWeight: "800", marginBottom: 2 },
-  cardTitle: { fontSize: 15.5, lineHeight: 23, fontWeight: "900", minHeight: 46 },
-  location: { fontSize: 12.5, marginTop: 2, marginBottom: 6 },
-  price: { color: "#1D6FD8", fontSize: 22, fontWeight: "900" },
-  priceUnit: { fontSize: 13, fontWeight: "700", color: "#6B7280" },
-  divider: { height: StyleSheet.hairlineWidth, marginTop: 8, marginBottom: 8 },
-  metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  meta: { fontSize: 12.5, fontWeight: "800" },
+  payBadge: { position: "absolute", top: 6, right: 6, backgroundColor: "rgba(15,32,68,0.92)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  payBadgeText: { color: "white", fontSize: 10.5, fontWeight: "800" },
+  featuredBadge: { position: "absolute", bottom: 6, right: 6, backgroundColor: "rgba(217,119,6,0.95)", borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 },
+  featuredBadgeText: { color: "white", fontSize: 9.5, fontWeight: "900" },
+  info: { paddingHorizontal: 9, paddingTop: 8, paddingBottom: 8 },
+  category: { color: "#1D6FD8", fontSize: 11, fontWeight: "800", marginBottom: 1 },
+  cardTitle: { fontSize: 12.5, lineHeight: 17, fontWeight: "900", minHeight: 34 },
+  location: { fontSize: 10.5, marginTop: 1, marginBottom: 4 },
+  price: { color: "#1D6FD8", fontSize: 15.5, fontWeight: "900" },
+  priceUnit: { fontSize: 10.5, fontWeight: "700", color: "#6B7280" },
+  divider: { height: StyleSheet.hairlineWidth, marginTop: 5, marginBottom: 5 },
+  metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  meta: { fontSize: 10.5, fontWeight: "800" },
 });

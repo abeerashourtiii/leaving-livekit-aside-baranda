@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { View, Animated, PanResponder, Platform, StyleSheet, type LayoutChangeEvent, type StyleProp, type ViewStyle } from "react-native";
+import { LtrTrack } from "./LtrTrack";
 
 // ↔ شريط أفقى متحرك تلقائيًا (Auto-scroll) مع سحب يدوى — مكوّن عام قابل لإعادة الاستخدام (يستخدمه شريط «إعلانات مميزة» فى 4 صفحات).
 //   • مبنى بـ Animated + PanResponder (وليس ScrollView أفقى) لتوحيد سلوك اتجاه RTL بين أندرويد وآيفون والويب والـ APK: المسار دائمًا direction:ltr
@@ -27,9 +28,11 @@ export function AutoCarousel<T>({ items, keyOf, renderItem, itemWidth, gap = 12,
   const n = items.length;
   const cardW = vw > 0 ? Math.max(1, Math.round(itemWidth(vw))) : 0;
   const step = cardW + gap;
-  const trackW = n * cardW + Math.max(0, n - 1) * gap;
-  const base = vw - trackW; // الإزاحة الابتدائية: آخر عنصر مرئيًا (الأول) ملاصق للحافة اليمنى
-  const maxOff = Math.max(0, -base);
+  const contentW = n * cardW + Math.max(0, n - 1) * gap;
+  // ↔ الخلايا لها حشو متماثل gap/2 على الجانبين (LtrTrack)، فالإزاحة الابتدائية تجعل الكارت الأول ملاصقًا للحافة اليمنى تمامًا
+  //   وغير مقصوص (إصلاح اقتصاص الكارت من اليمين فى الـ APK)، وعند آخر تمرير يلتصق الأخير بالحافة اليسرى.
+  const base = vw - contentW - gap / 2;
+  const maxOff = Math.max(0, contentW - vw);
   const stops = maxOff > 0 && step > 0 ? Math.ceil(maxOff / step) + 1 : 1;
 
   const x = useRef(new Animated.Value(0)).current;
@@ -109,13 +112,15 @@ export function AutoCarousel<T>({ items, keyOf, renderItem, itemWidth, gap = 12,
   return (
     <View style={[styles.viewport, webTouch, style]} onLayout={onLayout} {...pan.panHandlers}>
       {cardW > 0 && (
-        <Animated.View style={[styles.track, { width: trackW, transform: [{ translateX: x }] }]}>
-          {ordered.map((it, i) => (
-            <View key={keyOf(it)} style={{ width: cardW, marginRight: i === ordered.length - 1 ? 0 : gap, direction: contentDir }}>
-              {renderItem(it, cardW)}
-            </View>
-          ))}
-        </Animated.View>
+        <LtrTrack
+          visual={ordered}
+          keyOf={(it) => keyOf(it)}
+          cellW={step}
+          pad={gap / 2}
+          translate={x}
+          contentDir={contentDir}
+          renderItem={(it, w) => renderItem(it, w)}
+        />
       )}
     </View>
   );
@@ -123,5 +128,4 @@ export function AutoCarousel<T>({ items, keyOf, renderItem, itemWidth, gap = 12,
 
 const styles = StyleSheet.create({
   viewport: { width: "100%", overflow: "hidden", direction: "ltr" as const },
-  track: { flexDirection: "row", direction: "ltr" as const },
 });
