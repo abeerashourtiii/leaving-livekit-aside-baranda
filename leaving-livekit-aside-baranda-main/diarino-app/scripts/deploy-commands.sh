@@ -85,6 +85,7 @@ supabase functions deploy livekit-recording
 supabase functions deploy livekit-moderate
 supabase functions deploy livekit-send-message
 supabase functions deploy live-recording-url   # L1-ج: رابط موقّع لتسجيلات البث (مع التحقق من JWT)
+supabase functions deploy cloudinary-cleanup   # حذف ملفات Cloudinary اليتيمة (راجع docs/cloudinary-cleanup.md؛ يلزم CLEANUP_CRON_SECRET وأسرار Cloudinary)
 supabase functions deploy livekit-webhook --no-verify-jwt
 supabase functions deploy send-push --no-verify-jwt
 

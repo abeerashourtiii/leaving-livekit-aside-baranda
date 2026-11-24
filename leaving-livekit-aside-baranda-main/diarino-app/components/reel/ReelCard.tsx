@@ -1,3 +1,4 @@
+import { usePlaybackSpeed } from "../../lib/hooks/usePlaybackSpeed";
 import { registerProperties, trackWatch } from "../../lib/recommendation/store";
 import { useCallback, useEffect, useRef, useState, memo, useMemo } from "react";
 import { useIsFocused } from "@react-navigation/native";
@@ -143,7 +144,10 @@ export const ReelCard = memo(function ReelCard({
 
   // ↔ isLongPressing / currentReelSpeed — long-press anywhere (not on a
   // button or the seek bar) doubles playback speed while held.
-  const [speed, setSpeed] = useState<1 | 2>(1);
+  const [holdFast, setHoldFast] = useState(false);
+  // ↔ السرعة الفعلية = 2x أثناء الإمساك (الضغط المطوّل)، وإلا سرعة المستخدم المختارة من قائمة الخيارات (0.75x–2x، الافتراضى 1x).
+  const { speed: selectedSpeed } = usePlaybackSpeed();
+  const speed = holdFast ? 2 : selectedSpeed;
 
   // ---- video state ----
   const [videoPosMs, setVideoPosMs] = useState(0);
@@ -618,7 +622,7 @@ export const ReelCard = memo(function ReelCard({
         )}
 
         {/* ↔ .long-press-indicator */}
-        {speed === 2 && !detailsMounted && !pipUi && (
+        {holdFast && !detailsMounted && !pipUi && (
           <View style={styles.longPressIndicator} pointerEvents="none">
             <Text style={styles.longPressText}>⚡ 2X</Text>
           </View>
@@ -629,9 +633,9 @@ export const ReelCard = memo(function ReelCard({
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={togglePause}
-            onLongPress={() => setSpeed(2)}
+            onLongPress={() => setHoldFast(true)}
             delayLongPress={LONG_PRESS_MS}
-            onPressOut={() => setSpeed(1)}
+            onPressOut={() => setHoldFast(false)}
           />
         )}
 
@@ -683,6 +687,7 @@ export const ReelCard = memo(function ReelCard({
             onShare={() => onShare(property)}
             onToggleSave={() => onToggleFavorite(property.id)}
             onToggleCompare={() => onToggleCompare(property.id)}
+            onMore={onReport ? () => onReport(property) : undefined}
           />
         </Animated.View>
         )}

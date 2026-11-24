@@ -25,12 +25,10 @@ import { useNotifications } from "../../lib/hooks/useNotifications";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 import { LatLng, boundingBox, pointInPolygon } from "../../lib/geo";
-import { useActiveSponsoredReels } from "../../lib/hooks/useSponsoredReels";
-import { matchesLocationFilter, matchesSearchQuery } from "../../lib/sponsorMatch";
-import { usePropertiesByIds } from "../../lib/hooks/useProperties";
 import { useActiveAdBanners } from "../../lib/hooks/useAdBanners";
 import { AdBannerCarousel } from "../../components/menu/AdBannerCarousel";
-import { SponsoredAdReelModal } from "../../components/search/SponsoredAdReelModal";
+import { FeaturedAdsStrip } from "../../components/featured/FeaturedAdsStrip";
+import { SearchTrustBadges } from "../../components/search/SearchTrustBadges";
 import { padToEvenColumns } from "../../lib/gridPadding";
 import { AdGridCard } from "../../components/property/AdGridCard";
 import { setReelPlaylist } from "../../lib/reelPlaylist";
@@ -41,27 +39,17 @@ type SearchResultCardProps = {
   isComparing: boolean;
   onOpenDetails: (propertyId: string) => void;
   onToggleCompare: (propertyId: string) => void;
-  // ↔ إعلان «مميز» مدفوع: بنفس حجم باقى الكروت مع شارة «ممول»، والضغط عليه يفتح نافذة الإعلان الممول (وتسجيل الوصول).
-  sponsoredReelId?: string;
-  onOpenSponsored?: (propertyId: string, reelId: string) => void;
 };
 
-const SearchResultCard = memo(function SearchResultCard({ item, index, isComparing, onOpenDetails, onToggleCompare, sponsoredReelId, onOpenSponsored }: SearchResultCardProps) {
-  const { t } = useLanguage();
+const SearchResultCard = memo(function SearchResultCard({ item, index, isComparing, onOpenDetails, onToggleCompare }: SearchResultCardProps) {
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
   return (
     <AdGridCard
       item={item}
       index={index}
-      onPress={() => (sponsoredReelId && onOpenSponsored ? onOpenSponsored(item.id, sponsoredReelId) : onOpenDetails(item.id))}
-      bottomStart={
-        sponsoredReelId ? (
-          <View style={styles.sponsoredPill}>
-            <Text style={styles.sponsoredPillText}>{t("ممول")}</Text>
-          </View>
-        ) : undefined
-      }
+      // ↔ الإعلان المميز يظهر هنا كإعلان عادى بلا شارة «مميز»/«ممول» — الشارة فقط داخل شريط «إعلانات مميزة».
+      onPress={() => onOpenDetails(item.id)}
       topStart={
         <Pressable
           style={[styles.compareBadge, isComparing && styles.compareBadgeActive]}
@@ -101,18 +89,8 @@ export default function SearchScreen() {
   const [drawnPoints, setDrawnPoints] = useState<LatLng[]>([]);
   const [appliedPolygon, setAppliedPolygon] = useState<LatLng[] | null>(null);
 
-  // ↔ بند 7 (الإعلانات الممولة من صفحة البحث): نفس المصدرين المستخدمين
-  // فى شاشة الريلز (app/(tabs)/index.tsx) — بانرات الأدمن العادية
-  // (ad_banners) + الريلز الممولة (sponsored_reels)، عشان صفحة البحث
-  // تعرض نفس الإعلانات الحقيقية مش نسخة تانية منفصلة.
+  // ↔ بانرات «المساحة الإعلانية» (ad_banners) تظهر أعلى النتائج. أما «إعلانات مميزة» فمكوّن مستقل (FeaturedAdsStrip) بمصدره الخاص (sponsored_reels نوع in_feed).
   const { data: adBanners } = useActiveAdBanners();
-  const { data: sponsoredReels } = useActiveSponsoredReels();
-  const sponsorPropertyIds = useMemo(
-    () => [...new Set((sponsoredReels ?? []).map((s) => s.propertyId))],
-    [sponsoredReels]
-  );
-  const { data: sponsorProperties } = usePropertiesByIds(sponsorPropertyIds);
-  const [openSponsoredAd, setOpenSponsoredAd] = useState<{ reelId: string; property: Property } | null>(null);
 
   const debouncedQuery = useDebouncedValue(query, 400);
   const pageFilters: PropertyPageFilters = useMemo(() => ({
@@ -222,35 +200,9 @@ export default function SearchScreen() {
     },
     [compareSelection, t]
   );
-  // ↔ الإعلانات «المميزة» المدفوعة تظهر كأول كروت فى شبكة النتائج وبنفس حجم باقى الكروت (مش بعرض الصفحة)، الأحدث فى الأعلى.
-  //   تتفلتر بالمحافظة/المنطقة (ونص البحث): لو عقار الإعلان المميز خارج محافظة/منطقة البحث لا يظهر. ولا تظهر مع البحث بالخريطة/الموقع.
-  const featuredEntries = useMemo(() => {
-    if (appliedPolygon || geoPoint) return [] as { reelId: string; property: Property }[];
-    const byId = new Map((sponsorProperties ?? []).map((p) => [p.id, p]));
-    const seen = new Set<string>();
-    const out: { reelId: string; property: Property }[] = [];
-    for (const s of sponsoredReels ?? []) { // مرتبة من الأحدث
-      if (s.placement !== "in_feed" || seen.has(s.propertyId)) continue;
-      const p = byId.get(s.propertyId);
-      if (!p || p.closedType) continue;
-      if (!matchesLocationFilter(p, filters.provinces, filters.regions)) continue;
-      if (!matchesSearchQuery(p, debouncedQuery)) continue;
-      seen.add(p.id);
-      out.push({ reelId: s.id, property: p });
-    }
-    return out;
-  }, [sponsoredReels, sponsorProperties, filters.provinces, filters.regions, debouncedQuery, appliedPolygon, geoPoint]);
-  const featuredReelByProperty = useMemo(() => new Map(featuredEntries.map((e) => [e.property.id, e.reelId])), [featuredEntries]);
-  const gridResults = useMemo(
-    () => (featuredEntries.length ? [...featuredEntries.map((e) => e.property), ...results.filter((p) => !featuredReelByProperty.has(p.id))] : results),
-    [featuredEntries, featuredReelByProperty, results]
-  );
+  // ↔ الإعلان المميز يبقى فى قائمة النتائج العادية فى مكانه الطبيعى بدون أى شارة (الشارة داخل شريط «إعلانات مميزة» فقط).
   // ↔ الكارت الأخير المنفرد فى الصف بقى بنص الصف بدل الصف كله (lib/gridPadding.ts).
-  const paddedResults = useMemo(() => padToEvenColumns(gridResults), [gridResults]);
-  const handleOpenSponsored = useCallback((propertyId: string, reelId: string) => {
-    const property = featuredEntries.find((e) => e.property.id === propertyId)?.property;
-    if (property) setOpenSponsoredAd({ reelId, property });
-  }, [featuredEntries]);
+  const paddedResults = useMemo(() => padToEvenColumns(results), [results]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: Property | null; index: number }) => item === null ? (
@@ -262,11 +214,9 @@ export default function SearchScreen() {
         isComparing={compareSelection.isSelected(item.id)}
         onOpenDetails={handleOpenDetails}
         onToggleCompare={handleToggleCompare}
-        sponsoredReelId={featuredReelByProperty.get(item.id)}
-        onOpenSponsored={handleOpenSponsored}
       />
     ),
-    [compareSelection, handleOpenDetails, handleToggleCompare, featuredReelByProperty, handleOpenSponsored]
+    [compareSelection, handleOpenDetails, handleToggleCompare]
   );
 
   return (
@@ -399,12 +349,19 @@ export default function SearchScreen() {
           onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
           onEndReachedThreshold={0.5}
           ListHeaderComponent={
-            // ↔ إعلانات «المساحة الإعلانية» (من صفحة القائمة) بعرض الصفحة وبنفس مقاسها، وتظهر مع كل الفلاتر.
-            adBanners && adBanners.length > 0 ? (
-              <View style={{ paddingHorizontal: 14, marginBottom: 4 }}>
-                <AdBannerCarousel banners={adBanners} />
-              </View>
-            ) : null
+            <View>
+              {/* ↔ ٣ شارات ثقة (صفحة البحث فقط) ثم شريط «إعلانات مميزة» مباشرة بعد شريط البحث والفلترة؛ الشريط يتبع محافظة/منطقة/نص البحث ولا يظهر مع البحث بالخريطة/الموقع. */}
+              <SearchTrustBadges />
+              {!appliedPolygon && !geoPoint && (
+                <FeaturedAdsStrip filters={{ provinces: filters.provinces, regions: filters.regions, query: debouncedQuery }} />
+              )}
+              {/* ↔ إعلانات «المساحة الإعلانية» (من صفحة القائمة) بعرض الصفحة وبنفس مقاسها، وتظهر مع كل الفلاتر. */}
+              {adBanners && adBanners.length > 0 ? (
+                <View style={{ paddingHorizontal: 14, marginBottom: 4, marginTop: 10 }}>
+                  <AdBannerCarousel banners={adBanners} />
+                </View>
+              ) : null}
+            </View>
           }
           ListFooterComponent={isFetchingNextPage ? <ActivityIndicator color="#22A652" style={{ marginVertical: 16 }} /> : null}
           ListEmptyComponent={
@@ -464,11 +421,6 @@ export default function SearchScreen() {
         }}
       />
 
-      <SponsoredAdReelModal
-        property={openSponsoredAd?.property ?? null}
-        sponsoredReelId={openSponsoredAd?.reelId}
-        onClose={() => setOpenSponsoredAd(null)}
-      />
     </View>
   );
 }
@@ -476,8 +428,6 @@ export default function SearchScreen() {
 function createStyles(themeColors: ThemeColors) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: themeColors.background },
-    sponsoredPill: { backgroundColor: "rgba(217,119,6,0.95)", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-    sponsoredPillText: { color: "white", fontSize: 10.5, fontWeight: "900" },
     sponsoredCard: { height: 90, borderRadius: 14, overflow: "hidden", backgroundColor: themeColors.surface },
     sponsoredCardImg: { ...StyleSheet.absoluteFillObject },
     sponsoredCardOverlay: {

@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import { supabase } from "./supabase";
+import { computeFingerprint, runDeduped } from "./mediaDedup";
 
 // ↔ K3: رفع موقَّع عبر edge function (cloudinary-sign): توقيع قصير العمر لكل رفع بعد التحقق من جلسة غير مجهولة وحد يومى لكل مستخدم.
 //   مُعطَّل افتراضيًا (EXPO_PUBLIC_SIGNED_UPLOADS=1 لتفعيله)؛ ما دام الدالة/الأسرار غير مُهيّأة (501) أو تعذّر الاتصال نرجع للمسار القديم (preset عام)
@@ -74,6 +75,8 @@ export type CloudinaryUploadResult = {
   thumbnailUrl: string | null; // videos only, auto-derived
   format: string;
   bytes: number;
+  // ↔ true = أُعيد استخدام رفع سابق لنفس الملف (لم يُرفع شيء جديد) — راجع lib/mediaDedup.ts. لا تسجّله فى سجل media ثانيةً.
+  reused?: boolean;
 };
 
 export const VIDEO_AS_IMAGE_MESSAGE = "الملف المختار فيديو وليس صورة — اختر صورة (JPG أو PNG).";
@@ -145,7 +148,32 @@ export function cldVideoPosterUrl(url: string | null | undefined, transform = "w
 // بنرفع بـ XMLHttpRequest (الوحيد اللي بيدّي upload progress فى React Native
 // والويب)؛ ولما مايتبعتش بنفضل على fetch زي الأول — فباقي الاستخدامات (صور
 // البروفايل/الشات/الأدمن) متأثرتش.
+//
+// ↔ منع التكرار (lib/mediaDedup.ts): الدالة العامة uploadToCloudinary تحسب بصمة الملف وتعيد استخدام رفع سابق لنفس الملف من نفس المستخدم
+// بدل رفعه مرة أخرى (يوفّر Storage وBandwidth). options.fingerprintUri: الملف الأصلى الذى تُحسب بصمته لو الذى يُرفع نسخة مضغوطة/مُعدَّلة
+// (فيُطابَق الأصل عند إعادة المحاولة رغم اختلاف بايتات الناتج المضغوط). options.skipDedup: رفع فعلى دائمًا.
+// ⚠ لا overwrite=true ولا public_id من العميل هنا إطلاقًا — حتى لا يُستبدل ملف موجود بالخطأ.
 export async function uploadToCloudinary(
+  uri: string,
+  rawType: "image" | "video" | "audio",
+  onProgress?: (ratio: number) => void,
+  options?: { fingerprintUri?: string; skipDedup?: boolean }
+): Promise<CloudinaryUploadResult> {
+  if (options?.skipDedup) return uploadToCloudinaryRaw(uri, rawType, onProgress);
+  let ownerId: string | null = null;
+  try {
+    ownerId = (await supabase.auth.getSession()).data.session?.user?.id ?? null;
+  } catch {
+    ownerId = null;
+  }
+  const fp = ownerId ? await computeFingerprint(options?.fingerprintUri ?? uri, rawType) : null;
+  if (!ownerId || !fp) return uploadToCloudinaryRaw(uri, rawType, onProgress);
+  const result = await runDeduped(ownerId, fp, () => uploadToCloudinaryRaw(uri, rawType, onProgress));
+  if (result.reused) onProgress?.(1);
+  return result;
+}
+
+async function uploadToCloudinaryRaw(
   uri: string,
   rawType: "image" | "video" | "audio",
   onProgress?: (ratio: number) => void
@@ -391,7 +419,20 @@ export function cardThumbnailUrl(item: { coverImage: string | null; media: { typ
   const firstImage = item.media?.find((m) => m.type === "image");
   if (firstImage) return cldThumbnail(firstImage.url);
   const firstVideo = item.media?.find((m) => m.type === "video");
-  if (firstVideo) return cldVideoThumbnail(firstVideo.url);
+  // ↔ لقطة الإطار الأول بحجم الكارت (400×400) بدل الإطار بدقة الفيديو الأصلية — توفير باندويث فى شبكات البحث/المعلن/إعلاناتى. لا يُحمَّل فيديو.
+  if (firstVideo) return cldVideoPosterUrl(firstVideo.url, "w_400,h_400,c_fill,q_auto,f_auto") || cldVideoThumbnail(firstVideo.url);
+  return null;
+}
+
+// ↔ صورة غلاف مصغّرة لكارت «إعلانات مميزة» (أعرض من كارت الشبكة): نفس ترتيب أولويات cardThumbnailUrl (الغلاف ← أول صورة ← لقطة من الفيديو)
+//   لكن بأبعاد الكارت العريض (w_640,h_440). هى نفس روابط Cloudinary المخزّنة فى Supabase مع تحويل عرض فقط — لا إعادة رفع ولا تحميل فيديو.
+export function featuredCardThumbnailUrl(item: { coverImage: string | null; media: { type: string; url: string }[] }): string | null {
+  const T = "w_640,h_440,c_fill,q_auto,f_auto";
+  if (item.coverImage) return cldOptimized(item.coverImage, T);
+  const firstImage = item.media?.find((m) => m.type === "image");
+  if (firstImage) return cldOptimized(firstImage.url, T);
+  const firstVideo = item.media?.find((m) => m.type === "video");
+  if (firstVideo) return cldVideoPosterUrl(firstVideo.url, T) || cldVideoThumbnail(firstVideo.url);
   return null;
 }
 

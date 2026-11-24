@@ -13,7 +13,7 @@ import { showToast } from "../shared/Toast";
 import { AdminReel, ReelStatus } from "../../data/mock-admin";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 
-// ↔ «قديمة»: أقدم من 30 يومًا — صاحب الإعلان لا يحذفه بعد 24 ساعة من النشر، فحذف الإعلانات القديمة/غير الفعّالة من حق المشرفين (migration 20261021000000).
+// ↔ «قديمة»: أقدم من 30 يومًا — صاحب الإعلان يحذف إعلانه فى أى وقت (migration 20261121000300)، وللمشرفين حذف الإعلانات القديمة/غير الفعّالة.
 const OLD_CUTOFF = () => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const FILTERS: { key: "all" | "old" | ReelStatus; label: string }[] = [
   { key: "all", label: "الكل" }, { key: "pending", label: "قيد المراجعة" },

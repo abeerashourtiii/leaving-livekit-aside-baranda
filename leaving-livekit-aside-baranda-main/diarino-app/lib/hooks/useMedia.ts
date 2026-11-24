@@ -17,6 +17,8 @@ export function useLogMedia() {
       result: CloudinaryUploadResult;
     }) => {
       const { ownerId, type, context, contextId, result } = params;
+      // ↔ رفع أُعيد استخدامه (نفس الملف من نفس المستخدم، lib/mediaDedup.ts): سجله موجود من الرفع الأول — لا نكرّر صفًا لنفس الملف.
+      if (result.reused) return;
       const { error } = await supabase.from("media").insert({
         owner_id: ownerId, type, context, context_id: contextId ?? null,
         url: result.url, public_id: result.publicId, thumbnail_url: result.thumbnailUrl,

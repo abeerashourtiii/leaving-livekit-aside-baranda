@@ -7,6 +7,7 @@ import { useAdminSuggestions, useDismissSuggestion, useReplyToSuggestion } from 
 import { useAdminSupportContacts, useDismissSupportContact } from "../../lib/hooks/useSupportMessages";
 import { showToast } from "../shared/Toast";
 import { AdminPlaceSuggestions } from "./AdminPlaceSuggestions";
+import { useReportedContentViewer } from "./ReportedContentViewer";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 
 // ↔ replaces the old standalone "الإبلاغات" page (AdminReports.tsx) with
@@ -90,6 +91,8 @@ const TARGET_LABEL: Record<string, string> = { property: "ريل / إعلان", 
 
 function ReportsTab() {
   const db = useAdminDB();
+  // ↔ «عرض»: المشرف يرى الريل / الطلب / البث المُبلَّغ عنه قبل أن يقرر (ReportedContentViewer.tsx).
+  const viewer = useReportedContentViewer();
   const [replyingId, setReplyingId] = useState<string | null>(null);
   const [sendingReply, setSendingReply] = useState(false);
   async function sendReply(id: string, text: string) {
@@ -124,6 +127,7 @@ function ReportsTab() {
 
   return (
     <View style={{ gap: 10 }}>
+      {viewer.element}
       {db.reports.map((r) => (
         <View key={r.id} style={{ gap: 8 }}>
         <View style={styles.row}>
@@ -140,6 +144,14 @@ function ReportsTab() {
             {r.replied ? <Text style={styles.repliedText}>✓ تم الرد{r.reply ? `: ${r.reply}` : ""}</Text> : null}
           </View>
           <View style={styles.actions}>
+            <Pressable
+              style={[styles.actionBtn, { backgroundColor: "#2563EB" }]}
+              accessibilityRole="button"
+              accessibilityLabel={`عرض ${TARGET_LABEL[r.targetType] ?? "المحتوى"} المُبلَّغ عنه`}
+              onPress={() => { void viewer.open({ targetType: r.targetType, targetId: r.targetId, title: r.target }); }}
+            >
+              <Text style={[styles.actionBtnText, { color: "white" }]}>عرض</Text>
+            </Pressable>
             {!r.replied && (
               <Pressable style={[styles.actionBtn, { backgroundColor: "#15803D" }]} onPress={() => setReplyingId(replyingId === r.id ? null : r.id)}>
                 <Text style={[styles.actionBtnText, { color: "white" }]}>رد</Text>

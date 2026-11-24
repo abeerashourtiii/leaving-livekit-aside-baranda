@@ -81,14 +81,25 @@ function TruckGlyph({ size, color }: { size: number; color: string }) {
 // الـ elevation على أندرويد.)
 // ---------------------------------------------------------------------
 function Shell({
-  color, flex, round, minHeight, aspect, children,
-}: { color: string; flex?: boolean; round?: boolean; minHeight?: number; aspect?: number; children: ReactNode }) {
+  color, flex, round, roundSize, roundRadius, alignEnd, minHeight, aspect, children,
+}: {
+  color: string; flex?: boolean; round?: boolean; minHeight?: number; aspect?: number; children: ReactNode;
+  // ↔ مقاس/زوايا خانة "round": الدائرة (إدارة الحساب) قطرها roundSize وزواياها نصف القطر؛ والمربع المدوَّر (الإعدادات) زواياه 22 زى باقى الكروت.
+  roundSize?: number; roundRadius?: number; alignEnd?: boolean;
+}) {
   return (
     <View
       style={[
         styles.shell,
         { backgroundColor: color },
-        round ? styles.shellRound : null,
+        round
+          ? {
+              width: roundSize ?? 100,
+              height: roundSize ?? 100,
+              borderRadius: roundRadius ?? 22,
+              alignSelf: alignEnd ? ("flex-end" as const) : ("center" as const),
+            }
+          : null,
         flex ? { flex: 1 } : null,
         aspect ? { aspectRatio: aspect } : minHeight ? { minHeight } : null,
       ]}
@@ -119,10 +130,12 @@ function rimColor(textColor: string): string {
 // MenuCard
 // ---------------------------------------------------------------------
 export function MenuCard({
-  item, onPress, flex, shape = "rect", minHeight, iconBoxHeight = 56,
+  item, onPress, flex, shape = "rect", minHeight, iconBoxHeight = 56, circleSize, roundSide,
 }: {
   item: MenuItem; onPress: () => void; flex?: boolean;
   shape?: "rect" | "circle"; minHeight?: number; iconBoxHeight?: number;
+  // ↔ circleSize: قطر دائرة "إدارة الحساب". roundSide: ضلع مربع "الإعدادات" المدوَّر (يُحسب فى menu.tsx ليحاذى كارت «احمي استثمارك» المجاور).
+  circleSize?: number; roundSide?: number;
 }) {
   const { t, language } = useLanguage();
   // ↔ نافذة توضيح «احمي استثمارك» (تُفتح من علامة «!» على الكارت)
@@ -164,8 +177,19 @@ export function MenuCard({
   const mediaHeight = iconBoxHeight * (MEDIA_SIZE_SCALE[item.imageSize] ?? 1);
 
   // ---- 1) دائرة "إدارة الحساب" ----------------------------------------
-  if (shape === "circle" && item.iconKey === "account_circle") {
-    return <AccountCircle item={item} onPress={onPress} fg={item.fontColor ?? "#4A3427"} />;
+  // ↔ فى أى خانة (خانة round أو خانة نصف داخل صف كارت طويل): الكارت دائرة بصورة البروفايل (profiles.avatar_url — نفس صورة «إدارة الحساب»).
+  if (item.iconKey === "account_circle") {
+    return (
+      <AccountCircle
+        item={item}
+        onPress={onPress}
+        fg={item.fontColor ?? "#4A3427"}
+        size={circleSize ?? (shape === "circle" ? 100 : 108)}
+        slot={shape !== "circle"}
+        flex={flex}
+        minHeight={minHeight}
+      />
+    );
   }
 
   // ---- 2) بانر كامل بزرار CTA (لوازم السباكة والكهرباء) -----------------
@@ -273,12 +297,12 @@ export function MenuCard({
 
   if (layout === "hidden") {
     return (
-      <Shell color={item.color} flex={flex} round={shape === "circle"} minHeight={minHeight}>
+      <Shell color={item.color} flex={flex} round={shape === "circle"} roundSize={roundSide} roundRadius={22} alignEnd minHeight={minHeight}>
         <Pressable style={[...innerBase, { padding: 0 }]} onPress={onPress}>
           <Gradient item={item} />
           <Image
             source={bgSource!}
-            style={{ position: "absolute", top: padV, left: padH, right: padH, bottom: padV, borderRadius: shape === "circle" ? 999 : 12 }}
+            style={{ position: "absolute", top: padV, left: padH, right: padH, bottom: padV, borderRadius: shape === "circle" ? 16 : 12 }}
             contentFit={item.imageFit}
             transition={150}
           />
@@ -381,7 +405,7 @@ export function MenuCard({
 
   // layout === "below" (الافتراضي) — صورة/أيقونة فوق، النص تحتها، الاتنين متوسّطين.
   return (
-    <Shell color={item.color} flex={flex} round={shape === "circle"} minHeight={minHeight}>
+    <Shell color={item.color} flex={flex} round={shape === "circle"} roundSize={roundSide} roundRadius={22} alignEnd minHeight={minHeight}>
       <Pressable style={[...innerBase, styles.belowInner]} onPress={onPress}>
         <Gradient item={item} />
         {smallMedia(mediaHeight)}
@@ -400,12 +424,23 @@ export function MenuCard({
 // دائرة "إدارة الحساب": صورة المستخدم الفعلية (profiles.avatar_url) أو
 // أيقونة شخص لو مفيش صورة/ضيف — + شارة شخص صغيرة + الاسم تحتها.
 // ---------------------------------------------------------------------
-function AccountCircle({ item, onPress, fg }: { item: MenuItem; onPress: () => void; fg: string }) {
+function AccountCircle({
+  item, onPress, fg, size, slot, flex, minHeight,
+}: { item: MenuItem; onPress: () => void; fg: string; size: number; slot?: boolean; flex?: boolean; minHeight?: number }) {
   const { t } = useLanguage();
   const avatar = useMyAvatar();
-  return (
-    <Shell color={item.color} round>
-      <Pressable style={[styles.inner, styles.circleInner]} onPress={onPress}>
+  // ↔ كل المقاسات نسبة من القطر (size) فتبقى الدائرة متناسقة فى أى خانة (الصف الدائرى 100، نصف الصف الطويل ~ 110-124).
+  const avatarSize = Math.round(size * 0.58);
+  const badgeSize = Math.max(18, Math.round(size * 0.2));
+  const labelSize = Math.max(11, Math.round(size * 0.115));
+  const circle = (
+    <Shell color={item.color} round roundSize={size} roundRadius={size / 2}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t(item.title)}
+        style={[styles.inner, styles.circleInner, { borderRadius: size / 2 }]}
+        onPress={onPress}
+      >
         <LinearGradient
           pointerEvents="none"
           colors={[item.color, item.colorEnd ?? item.color]}
@@ -413,27 +448,41 @@ function AccountCircle({ item, onPress, fg }: { item: MenuItem; onPress: () => v
           end={{ x: 0.5, y: 1 }}
           style={StyleSheet.absoluteFill}
         />
-        <View style={styles.avatarWrap}>
-          <View style={styles.avatarCircle}>
+        <View style={{ width: avatarSize, height: avatarSize, marginTop: -2 }}>
+          <View style={[styles.avatarCircle, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}>
             {avatar ? (
               <Image
-                source={{ uri: cldOptimized(avatar, "w_200,h_200,c_fill,q_auto,f_auto") }}
+                source={{ uri: cldOptimized(avatar, "w_240,h_240,c_fill,q_auto,f_auto") }}
                 style={StyleSheet.absoluteFill}
                 contentFit="cover"
                 transition={150}
               />
             ) : (
-              <PersonGlyph size={30} color="#8A6A4A" />
+              <PersonGlyph size={Math.round(avatarSize * 0.52)} color="#8A6A4A" />
             )}
           </View>
-          <View style={styles.avatarBadge}>
-            <PersonGlyph size={11} color="#FFF7E6" />
+          <View style={[styles.avatarBadge, { width: badgeSize, height: badgeSize, borderRadius: badgeSize / 2 }]}>
+            <PersonGlyph size={Math.round(badgeSize * 0.55)} color="#FFF7E6" />
           </View>
         </View>
-        <Text style={[styles.circleLabel, { color: fg }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{t(item.title)}</Text>
-        <View pointerEvents="none" style={styles.circleRing} />
+        <Text
+          style={[styles.circleLabel, { color: fg, fontSize: labelSize, maxWidth: size - 16 }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+        >
+          {t(item.title)}
+        </Text>
+        <View pointerEvents="none" style={[styles.circleRing, { borderRadius: size / 2 }]} />
       </Pressable>
     </Shell>
+  );
+  // ↔ داخل خانة مكدّسة (كارت طويل بجانبها): نفس الخانة (flex + نفس الارتفاع) والدائرة فى منتصفها بدل الكارت المستطيل.
+  if (!slot) return circle;
+  return (
+    <View style={[flex ? { flex: 1 } : null, minHeight ? { minHeight } : null, { alignItems: "center", justifyContent: "center" }]}>
+      {circle}
+    </View>
   );
 }
 

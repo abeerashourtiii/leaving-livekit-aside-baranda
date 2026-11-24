@@ -1,8 +1,8 @@
 import { openExternalUrl } from "../../lib/linking";
 import { useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, TextInput, Alert, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, StyleSheet, TextInput, Alert, ActivityIndicator, Switch } from "react-native";
 import {
-  useAdminDeals, useAdminUpdateDeal, useDealSettings, useUpdateDealSettings,
+  useAdminDeals, useAdminUpdateDeal, useDealSettings, useUpdateDealSettings, useSetDealFeesEnabled,
   AdminDealRow, DealStatus, DEAL_STATUS_LABELS,
 } from "../../lib/hooks/useDeals";
 import { ACCOUNT_TYPE_LABELS, isAccountType } from "../../lib/accountTypes";
@@ -11,6 +11,7 @@ import { showToast } from "../shared/Toast";
 import { paymentMethodLabel } from "../../lib/paymentInfo";
 import { AdminPromotions } from "./AdminPromotions";
 import { AdminAdSpaceOrders } from "./AdminAdSpaceOrders";
+import { AdminReelPlans } from "./AdminReelPlans";
 import { useIsAdmin } from "../../lib/hooks/useIsAdmin";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 
@@ -38,11 +39,12 @@ const STATUS_COLORS: Record<DealStatus, string> = {
 const fmtMoney = (n: number) => `${n.toLocaleString("en-US")} ج.م`;
 const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("ar-EG", { year: "numeric", month: "short", day: "numeric" }) : "—");
 
-// ↔ تبويبان: «الصفقات والرسوم» (رسوم تم البيع/تم الإيجار) و«الترويج المدفوع» (اجعل الإعلان افتتاحي/مميز) — نفس صلاحية deals.
+// ↔ تبويبات: «الصفقات والرسوم» (رسوم تم البيع/تم الإيجار) و«الترويج المدفوع» (اجعل الإعلان افتتاحي/مميز) و«المساحة الإعلانية» و«باقات الريلز»
+//   (الاشتراك الشهرى لزيادة حد الريلز: 20 مجانًا + باقتان) — نفس صلاحية deals ونفس آلية السداد (فودافون كاش / اتصالات كاش / إنستاباي).
 export function AdminDeals() {
   const themeColors = useThemeColors();
   const styles = createStyles(themeColors);
-  const [tab, setTab] = useState<"deals" | "promos" | "space">("deals");
+  const [tab, setTab] = useState<"deals" | "promos" | "space" | "plans">("deals");
   return (
     <View style={{ gap: 14 }}>
       <View style={styles.tabsRow}>
@@ -55,8 +57,11 @@ export function AdminDeals() {
         <Pressable style={[styles.tabBtn, tab === "space" && styles.tabBtnOn]} onPress={() => setTab("space")}>
           <Text style={[styles.tabText, tab === "space" && styles.tabTextOn]}>المساحة الإعلانية</Text>
         </Pressable>
+        <Pressable style={[styles.tabBtn, tab === "plans" && styles.tabBtnOn]} onPress={() => setTab("plans")}>
+          <Text style={[styles.tabText, tab === "plans" && styles.tabTextOn]}>باقات الريلز</Text>
+        </Pressable>
       </View>
-      {tab === "deals" ? <AdminDealsList /> : tab === "promos" ? <AdminPromotions /> : <AdminAdSpaceOrders />}
+      {tab === "deals" ? <AdminDealsList /> : tab === "promos" ? <AdminPromotions /> : tab === "plans" ? <AdminReelPlans /> : <AdminAdSpaceOrders />}
     </View>
   );
 }
@@ -68,6 +73,7 @@ function AdminDealsList() {
   const update = useAdminUpdateDeal();
   const { settings, known: settingsKnown, refetch: refetchSettings } = useDealSettings();
   const saveSettings = useUpdateDealSettings();
+  const setFeesEnabled = useSetDealFeesEnabled();
   // ↔ إعدادات الرسوم: مطوية افتراضيًا لاختصار الصفحة، والتعديل للمشرف الرئيسي فقط (تغييرها يستلزم إعادة ضبط السياسات)؛ المشرف العادى يفتحها للعرض فقط.
   const { isSuperAdmin } = useIsAdmin();
   const [open, setOpen] = useState(false);
@@ -127,6 +133,27 @@ function AdminDealsList() {
     ]);
   }
 
+  // ↔ مفتاح تشغيل/إيقاف رسوم «تم البيع / تم الإيجار» (المشرف الرئيسى فقط). معطّل = الخدمة مجانية: الإعلان يُغلق بالشارة بدون رسم ولا فاتورة.
+  function handleToggleFees(next: boolean) {
+    if (!isSuperAdmin) return;
+    if (!settingsKnown) return Alert.alert("تعذر تحميل الإعدادات الحالية", "تحقق من الاتصال ثم أعد المحاولة.", [{ text: "إعادة المحاولة", onPress: () => { void refetchSettings(); } }, { text: "إغلاق", style: "cancel" }]);
+    const title = next ? "تفعيل رسوم تم البيع / تم الإيجار؟" : "تعطيل الرسوم (خدمة مجانية)؟";
+    const msg = next
+      ? "ستُحتسب الرسوم وتصدر فاتورة على كل صفقة جديدة تُسجَّل بعد الآن. تذكير: سياسة البيع والرسوم تلزم بإخطار الناشرين قبل تفعيل الرسوم بـ 30 يومًا. هل أخطرتهم؟"
+      : "سيبقى «تم البيع / تم الإيجار» يُغلق الإعلان ويضع الشارة، لكن بدون رسم ولا فاتورة ولا تحويل لصفحة الفاتورة. الصفقات السابقة لا تتأثر.";
+    Alert.alert(title, msg, [
+      { text: "إلغاء", style: "cancel" },
+      {
+        text: next ? "تفعيل الرسوم" : "تعطيل الرسوم",
+        style: next ? "destructive" : "default",
+        onPress: () => setFeesEnabled.mutate(next, {
+          onSuccess: () => showToast(next ? "تم تفعيل الرسوم" : "تم تعطيل الرسوم — الخدمة مجانية"),
+          onError: (e) => Alert.alert("تعذر التغيير", logAndGetSafeMessage("deal fees toggle failed", e, "حاول مرة أخرى. (يتطلب تطبيق migration 20261121000000_deal_fees_toggle.sql وصلاحية المشرف الرئيسي)")),
+        }),
+      },
+    ]);
+  }
+
   function handleSaveSettings() {
     if (!isSuperAdmin) return;
     // ↔ لو الإعدادات الحالية لم تُحمَّل من الخادم (خطأ شبكة) لا نحفظ: كان الحفظ يكتب القيم الافتراضية فوق الفعلية.
@@ -160,6 +187,24 @@ function AdminDealsList() {
           <Text style={styles.totalNum}>{fmtMoney(totals.paidSum)}</Text>
           <Text style={styles.totalLabel}>محصَّل ({totals.paidCount} صفقة)</Text>
         </View>
+      </View>
+
+      <View style={styles.card}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>رسوم «تم البيع / تم الإيجار»</Text>
+            <Text style={[styles.hint, { color: settingsKnown ? (settings.feesEnabled ? "#D97706" : "#15803D") : themeColors.textSubtle }]}>
+              {!settingsKnown ? "جارٍ تحميل الحالة…" : settings.feesEnabled ? "مفعّلة — تُحتسب رسوم وتصدر فاتورة على كل صفقة جديدة" : "معطّلة — الخدمة مجانية حاليًا (الإعلان يُغلق بالشارة بدون رسم أو فاتورة)"}
+            </Text>
+          </View>
+          <Switch
+            value={settingsKnown ? settings.feesEnabled : false}
+            onValueChange={handleToggleFees}
+            disabled={!isSuperAdmin || !settingsKnown || setFeesEnabled.isPending}
+            accessibilityLabel="تفعيل رسوم تم البيع أو تم الإيجار"
+          />
+        </View>
+        {!isSuperAdmin ? <Text style={styles.hint}>عرض فقط — تفعيل/تعطيل الرسوم من صلاحية المشرف الرئيسي.</Text> : null}
       </View>
 
       <View style={styles.card}>
@@ -225,7 +270,7 @@ function AdminDealsList() {
             <View style={styles.rowBetween}>
               <Text style={styles.dealTitle} numberOfLines={2}>{d.propertyTitle || "—"}</Text>
               <View style={[styles.badge, { backgroundColor: STATUS_COLORS[d.status] }]}>
-                <Text style={styles.badgeText}>{DEAL_STATUS_LABELS[d.status]}</Text>
+                <Text style={styles.badgeText}>{d.status === "waived" && d.feeEgp === 0 ? "مجانية (بدون رسوم)" : DEAL_STATUS_LABELS[d.status]}</Text>
               </View>
             </View>
             <Text style={styles.hint}>
@@ -339,8 +384,8 @@ function createStyles(themeColors: ThemeColors) {
     badge: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
     badgeText: { color: "#fff", fontSize: 10.5, fontWeight: "900" },
     payer: { fontSize: 12.5, fontWeight: "800", color: themeColors.text },
-    tabsRow: { flexDirection: "row", gap: 8 },
-    tabBtn: { flex: 1, borderRadius: 12, paddingVertical: 10, alignItems: "center", backgroundColor: themeColors.surface, borderWidth: 1, borderColor: themeColors.border },
+    tabsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    tabBtn: { flexGrow: 1, flexBasis: "22%", minWidth: 96, borderRadius: 12, paddingVertical: 10, alignItems: "center", backgroundColor: themeColors.surface, borderWidth: 1, borderColor: themeColors.border },
     tabBtnOn: { backgroundColor: "#6366f1", borderColor: "#6366f1" },
     tabText: { fontSize: 13, fontWeight: "800", color: themeColors.textMuted },
     tabTextOn: { color: "#fff" },

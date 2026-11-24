@@ -25,6 +25,9 @@ import { promptGuestLogin } from "../../lib/guestGate";
 import { useActiveAdBanners } from "../../lib/hooks/useAdBanners";
 import { AdBannerCarousel } from "../../components/menu/AdBannerCarousel";
 import { MenuCard } from "../../components/menu/MenuCard";
+import { ServicesSection } from "../../components/menu/ServicesSection";
+import { FeaturedAdsStrip } from "../../components/featured/FeaturedAdsStrip";
+import { INFO_BADGE_GUTTER } from "../../components/menu/ProtectInvestmentInfo";
 import { menuArtCardFor, CRANE_CARD_ASPECT } from "../../lib/menuIconRegistry";
 import { useActiveMenuItems, MenuItem } from "../../lib/hooks/useMenuItems";
 import { useThemeColors } from "../../lib/hooks/useThemeColors";
@@ -123,6 +126,26 @@ export default function MenuScreen() {
   // الحد الأدنى 150: محتوى كارت الإعدادات نفسه (أيقونة كبيرة + عنوان) ≈ 147 — لو الحد أقل منه
   // على الشاشات الضيقة الإعدادات هيفضل أطول من الونش بفرق بسيط بدل ما يتساووا.
   const artStackMinHeight = colW > 0 ? Math.max(150, Math.ceil(colW / CRANE_CARD_ASPECT)) : undefined;
+  // ↔ مقاسات خانة "round" المجاورة لكارت عريض:
+  //   * الإعدادات (مربع مدوَّر بزوايا 22 مثل باقى الكروت): ضلعه = ارتفاع كارت «احمي استثمارك» المرئى بالضبط فيتحاذى معه من الأعلى
+  //     والأسفل. الكارت العريض عرضه = عرض الصف − الضلع − الفجوة(12) − حشوة علامة «!»(INFO_BADGE_GUTTER) وارتفاعه = عرضه ÷ aspect،
+  //     وبحل side = (W − 12 − gutter) / (aspect + 1) بدون أى قياس (يعطى نفس النتيجة على أندرويد/آيفون/ويب).
+  //   * إدارة الحساب: دائرة بصورة البروفايل قطرها يناسب الخانة (راجع accountCircleSize).
+  const rowW = scrollW > 0 ? scrollW - 28 : 0;
+  function roundSideFor(wide: MenuItem): number | undefined {
+    if (rowW <= 0) return undefined;
+    const art = menuArtCardFor(wide);
+    if (art?.aspect) {
+      const gutter = art.infoPopup === "protect" ? INFO_BADGE_GUTTER : 0;
+      return Math.max(64, Math.round((rowW - 12 - gutter) / (art.aspect + 1)));
+    }
+    return H.wide - 10;
+  }
+  function accountCircleSize(cellHeight: number | undefined): number {
+    const byCell = (cellHeight ?? 140) - 20;
+    const byCol = colW > 0 ? colW - 24 : 124;
+    return Math.max(84, Math.min(124, byCell, byCol));
+  }
   const liveFeatureEnabled = useFeatureFlag("live");
   // ↔ مفيش داعي نعمل polling على اللايفات النشطة والميزة مخفية.
   const { data: activeLivesData } = useActiveLives(liveFeatureEnabled);
@@ -162,6 +185,76 @@ export default function MenuScreen() {
   const visibleMenuItems = liveFeatureEnabled ? menuItems : menuItems.filter((i) => !isLiveMenuItem(i));
   const rows = buildRows(visibleMenuItems);
 
+  // ↔ رسم صف واحد من عناصر القائمة (مستخرَج من rows.map لنضع قسم «الخدمات» بعد صف «احمي استثمارك + الإعدادات» مباشرة).
+  function renderRow(row: Row) {
+    if (row.type === "full") {
+      return (
+        <MenuCard key={row.item.id} item={row.item} iconBoxHeight={row.item.ctaLabel ? 92 : 46} minHeight={row.item.size === "full" ? undefined : H.wide} onPress={() => runAction(row.item)} />
+      );
+    }
+    if (row.type === "pair") {
+      return (
+        <View key={row.items.map((r) => r.id).join("-")} style={styles.row}>
+          {row.items.map((item) => (
+            <MenuCard key={item.id} item={item} flex iconBoxHeight={56} onPress={() => runAction(item)} />
+          ))}
+        </View>
+      );
+    }
+    if (row.type === "stackTall") {
+      // نصفين مكدّسين (أول عنصر فى JSX = بداية الصف: يمين فى RTL) + الطويل بعدهم.
+      return (
+        <View key={row.tall.id + "-stacktall"} style={styles.row}>
+          <View style={styles.stackCol}>
+            {row.stack.map((item) => (
+              <MenuCard key={item.id} item={item} flex iconBoxHeight={70} circleSize={accountCircleSize((H.stackTall - 12) / 2)} onPress={() => runAction(item)} />
+            ))}
+          </View>
+          <MenuCard item={row.tall} flex minHeight={H.stackTall} iconBoxHeight={90} onPress={() => runAction(row.tall)} />
+        </View>
+      );
+    }
+    if (row.type === "tallPair") {
+      return (
+        <View key={row.tall.id + "-tall"} style={styles.row}>
+          <MenuCard item={row.tall} flex minHeight={H.tallPair} iconBoxHeight={104} onPress={() => runAction(row.tall)} />
+          <View style={styles.stackCol}>
+            {row.stack.map((item) => (
+              <MenuCard
+                key={item.id}
+                item={item}
+                flex
+                // ↔ لو فى الصف كارت صورة جاهزة (الونش): الاتنين بنفس الارتفاع الأدنى فيتساووا ولا يتقلّص أى واحد.
+                minHeight={row.stack.some((it) => !!menuArtCardFor(it)) ? artStackMinHeight : undefined}
+                iconBoxHeight={54}
+                circleSize={accountCircleSize(row.stack.some((it) => !!menuArtCardFor(it)) ? artStackMinHeight : (H.tallPair - 12) / 2)}
+                onPress={() => runAction(item)}
+              />
+            ))}
+          </View>
+        </View>
+      );
+    }
+    if (row.type === "wideRound") {
+      return (
+        <View key={row.wide.id + "-wideround"} style={[styles.row, { alignItems: row.round.iconKey === "account_circle" ? "center" : "flex-end" }]}>
+          <MenuCard item={row.wide} flex minHeight={H.wide} iconBoxHeight={72} onPress={() => runAction(row.wide)} />
+          <MenuCard item={row.round} shape="circle" iconBoxHeight={26} roundSide={roundSideFor(row.wide)} onPress={() => runAction(row.round)} />
+        </View>
+      );
+    }
+    return (
+      <View key={row.round.id + "-round"} style={[styles.row, { alignItems: row.round.iconKey === "account_circle" ? "center" : "flex-end" }]}>
+        <MenuCard item={row.round} shape="circle" iconBoxHeight={26} roundSide={roundSideFor(row.wide)} onPress={() => runAction(row.round)} />
+        <MenuCard item={row.wide} flex minHeight={H.wide} iconBoxHeight={72} onPress={() => runAction(row.wide)} />
+      </View>
+    );
+  }
+
+  // ↔ موضع قسم «الخدمات»: بعد الصف اللى فيه كارت «احمي استثمارك» (صفّه فيه «الإعدادات»)؛ لو غير موجود (الأدمن عطّله) بعد أول صف.
+  const protectRowIdx = rows.findIndex((r) => (r.type === "roundPair" || r.type === "wideRound") && menuArtCardFor(r.wide)?.infoPopup === "protect");
+  const servicesAt = protectRowIdx >= 0 ? protectRowIdx + 1 : Math.min(1, rows.length);
+
   const content = (
     <>
       <PageTopBar
@@ -188,69 +281,12 @@ export default function MenuScreen() {
         />
 
         {/* عناصر القائمة الديناميكية */}
-        {rows.map((row) => {
-          if (row.type === "full") {
-            return (
-              <MenuCard key={row.item.id} item={row.item} iconBoxHeight={row.item.ctaLabel ? 92 : 46} minHeight={row.item.size === "full" ? undefined : H.wide} onPress={() => runAction(row.item)} />
-            );
-          }
-          if (row.type === "pair") {
-            return (
-              <View key={row.items.map((r) => r.id).join("-")} style={styles.row}>
-                {row.items.map((item) => (
-                  <MenuCard key={item.id} item={item} flex iconBoxHeight={56} onPress={() => runAction(item)} />
-                ))}
-              </View>
-            );
-          }
-          if (row.type === "stackTall") {
-            // نصفين مكدّسين (أول عنصر فى JSX = بداية الصف: يمين فى RTL) + الطويل بعدهم.
-            return (
-              <View key={row.tall.id + "-stacktall"} style={styles.row}>
-                <View style={styles.stackCol}>
-                  {row.stack.map((item) => (
-                    <MenuCard key={item.id} item={item} flex iconBoxHeight={70} onPress={() => runAction(item)} />
-                  ))}
-                </View>
-                <MenuCard item={row.tall} flex minHeight={H.stackTall} iconBoxHeight={90} onPress={() => runAction(row.tall)} />
-              </View>
-            );
-          }
-          if (row.type === "tallPair") {
-            return (
-              <View key={row.tall.id + "-tall"} style={styles.row}>
-                <MenuCard item={row.tall} flex minHeight={H.tallPair} iconBoxHeight={104} onPress={() => runAction(row.tall)} />
-                <View style={styles.stackCol}>
-                  {row.stack.map((item) => (
-                    <MenuCard
-                      key={item.id}
-                      item={item}
-                      flex
-                      // ↔ لو فى الصف كارت صورة جاهزة (الونش): الاتنين بنفس الارتفاع الأدنى فيتساووا ولا يتقلّص أى واحد.
-                      minHeight={row.stack.some((it) => !!menuArtCardFor(it)) ? artStackMinHeight : undefined}
-                      iconBoxHeight={54}
-                      onPress={() => runAction(item)}
-                    />
-                  ))}
-                </View>
-              </View>
-            );
-          }
-          if (row.type === "wideRound") {
-            return (
-              <View key={row.wide.id + "-wideround"} style={[styles.row, { alignItems: "center" }]}>
-                <MenuCard item={row.wide} flex minHeight={H.wide} iconBoxHeight={72} onPress={() => runAction(row.wide)} />
-                <MenuCard item={row.round} shape="circle" iconBoxHeight={26} onPress={() => runAction(row.round)} />
-              </View>
-            );
-          }
-          return (
-            <View key={row.round.id + "-round"} style={[styles.row, { alignItems: "center" }]}>
-              <MenuCard item={row.round} shape="circle" iconBoxHeight={26} onPress={() => runAction(row.round)} />
-              <MenuCard item={row.wide} flex minHeight={H.wide} iconBoxHeight={72} onPress={() => runAction(row.wide)} />
-            </View>
-          );
-        })}
+        {rows.slice(0, servicesAt).map(renderRow)}
+
+        {/* ↔ قسم «الخدمات» (دليل الشركات) بعرض الشاشة كاملًا أسفل صف «احمي استثمارك» و«الإعدادات» مباشرة. */}
+        <ServicesSection />
+
+        {rows.slice(servicesAt).map(renderRow)}
 
         {!!activeLives?.length && (
           <Pressable
@@ -265,6 +301,9 @@ export default function MenuScreen() {
             <Text style={styles.liveNowJoin}>{t("مشاهدة")}</Text>
           </Pressable>
         )}
+
+        {/* ↔ «إعلانات مميزة» فى نهاية صفحة القائمة. */}
+        <FeaturedAdsStrip style={{ paddingHorizontal: 0 }} />
       </ScrollView>
 
       <NotificationsDropdown

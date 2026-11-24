@@ -1,5 +1,6 @@
 // ↔ نافذة الـ 24 ساعة لصاحب الإعلان/الطلب (migration 20261021000000_edit_delete_windows.sql — التنفيذ الحقيقى على الخادم، والواجهة بتعكسه):
-//  • الإعلان: التعديل والحذف خلال 24 ساعة من **أول نشر** (موافقة الأدمن). بعدها الحذف للمشرفين فقط. قبل النشر (قيد المراجعة/مرفوض) بلا مدة.
+//  • الإعلان: **التعديل** خلال 24 ساعة من أول نشر (موافقة الأدمن). قبل النشر (قيد المراجعة/مرفوض) بلا مدة.
+//    **الحذف متاح للمعلن فى أى وقت** (أُلغيت مدة الـ 24 ساعة للحذف: migration 20261121000300_reel_limit_plans.sql) — يحرّر مكانًا من حد الريلز.
 //  • الطلب: الحذف خلال 24 ساعة من وقت عرضه. بعدها للمشرفين.
 export const OWNER_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -23,7 +24,8 @@ export function adWindow(
   if (base === undefined) return { published: false, remainingMs: null, editable: true, deletable: true };
   const remainingMs = base + OWNER_WINDOW_MS - now;
   const open = remainingMs > 0;
-  return { published: true, remainingMs: Math.max(0, remainingMs), editable: open, deletable: open };
+  // ↔ الحذف دائمًا متاح للمعلن (لا يرتبط بالـ 24 ساعة)؛ مدة الـ 24 ساعة للتعديل فقط.
+  return { published: true, remainingMs: Math.max(0, remainingMs), editable: open, deletable: true };
 }
 
 // ↔ الطلب: التعديل والحذف لصاحبه خلال 24 ساعة من عرضه (created_at) — الخادم يفرضها (20261021000000 للحذف، 20261105000000 للتعديل).

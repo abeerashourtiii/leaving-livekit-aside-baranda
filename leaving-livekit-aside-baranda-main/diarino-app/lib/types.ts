@@ -77,6 +77,8 @@ export type Property = {
   publishedAt?: number;
   // ↔ الإعلان المُغلق بصفقة (تم البيع / تم الإيجار) — يظهر لصاحبه فقط، ويختفى عن الجميع بسياسة RLS.
   closedType?: "sold" | "rented";
+  // ↔ false = الإعلان «غير نشط» (أوقفه صاحبه مؤقتًا من إدارة الحساب): لا يظهر فى البحث ولا صفحة المعلن ولا الريلز لغير صاحبه (RLS: migration 20261122000000)، ويبقى فى «إعلاناتي» ليُنشَّط ثانيةً. undefined/true = نشط.
+  isActive?: boolean;
   // ↔ created_at الخام (ISO بالميكروثانية) — لمؤشر الترقيم (created_at, id) فى lib/hooks/useProperties.ts (createdAt بالمللى لا يكفى).
   createdAtRaw?: string;
   // ↔ وقت إقرار ملكية الحقوق (يُسجَّل مرة واحدة عند أول نشر بوقت الخادم — لا يتغيّر مع التعديلات).

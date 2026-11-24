@@ -286,6 +286,7 @@ const isOwn = (p: RecoProperty) => !!userId && p.seller?.id === userId; // لا 
 // ───────────── الإشارات ─────────────
 export function trackWatch(p: RecoProperty, info: WatchInfo) {
   if (!enabled || isOwn(p)) return;
+  if (profile.hidden?.[p.id] !== undefined) return; // «غير مهتم»: مشاهدته قبل الاختيار لا تُحتسب اهتمامًا
   registerProperties([p]);
   applyWatch(profile, p, info, Date.now());
   touched();
@@ -297,6 +298,19 @@ export function trackSignal(kind: SignalKind, target: RecoProperty | string) {
   if (!p || isOwn(p)) return;
   applySignal(profile, p, kind, Date.now());
   touched();
+}
+
+/**
+ * «غير مهتم» من قائمة خيارات الريل: يُنزل أوزان خصائص الريل (النوع/الغرض/المحافظة/المعلن/السعر...) ويستبعده من الترتيب نهائيًا.
+ * يرجّع true لو سُجّل فى ملف التوصية (التخصيص مفعّل وليس ريله هو)؛ false = لم يُسجَّل (فالواجهة تكتفى بإخفائه فى الجلسة).
+ */
+export function markNotInterested(target: RecoProperty | string): boolean {
+  if (!enabled) return false;
+  const p = typeof target === "string" ? registry.get(target) : target;
+  if (!p || isOwn(p)) return false;
+  applySignal(profile, p, "not_interested", Date.now());
+  touched();
+  return true;
 }
 
 export function trackSellerFollow(sellerId: string, following: boolean) {

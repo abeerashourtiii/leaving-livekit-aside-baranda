@@ -1,6 +1,7 @@
 import { memo, ReactNode } from "react";
 import { View, Text, Pressable, PressableProps, StyleSheet } from "react-native";
 import { Image } from "expo-image";
+import Svg, { Path } from "react-native-svg";
 import { fmtPrice, Property } from "../../lib/types";
 import { cardThumbnailUrl } from "../../lib/cloudinary";
 import { formatLocationLine } from "../../lib/formatLocation";
@@ -35,6 +36,7 @@ export const AdGridCard = memo(function AdGridCard({ item, index = 0, topStart, 
   const thumbnailUrl = cardThumbnailUrl(item);
   // ↔ إعلان مُغلق بصفقة: الشارة تكتب «تم البيع» أو «تم الإيجار» بدل «بيع/إيجار» (ويبقى الكارت فى إدارة الحساب وصفحة المعلن).
   const closed = item.closedType;
+  const inactive = item.isActive === false; // ↔ «غير نشط»: غير ظاهر لغير صاحبه (يظهر هنا فى إعلاناتي فقط)
   const badgeText = closed ? (closed === "rented" ? t("تم الإيجار") : t("تم البيع")) : item.purpose === "sale" ? t("بيع") : t("إيجار");
   const badgeColor = closed ? "#B91C1C" : item.purpose === "sale" ? "#22A652" : "#F4673F";
   return (
@@ -46,6 +48,19 @@ export const AdGridCard = memo(function AdGridCard({ item, index = 0, topStart, 
           <ReelBackground index={index} type={item.type} />
         )}
         {!!closed && <View style={styles.closedOverlay} pointerEvents="none" />}
+        {inactive && !closed && (
+          <>
+            <View style={styles.inactiveOverlay} pointerEvents="none" />
+            <View style={styles.inactiveCenter} pointerEvents="none">
+              <View style={styles.inactivePill}>
+                <Svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                  <Path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24M1 1l22 22" />
+                </Svg>
+                <Text style={styles.inactivePillText}>{t("غير نشط")}</Text>
+              </View>
+            </View>
+          </>
+        )}
         <View style={[styles.purposeBadge, { backgroundColor: badgeColor }]}>
           <Text style={styles.purposeBadgeText}>{badgeText}</Text>
         </View>
@@ -53,14 +68,13 @@ export const AdGridCard = memo(function AdGridCard({ item, index = 0, topStart, 
         {!!bottomStart && <View style={styles.bottomStart}>{bottomStart}</View>}
       </View>
       <View style={styles.info}>
-        {/* ↔ عنوان الإعلان بدل نوع العقار (شقة/فيلا...): سطر واحد بخط يصغر تلقائيًا ليكفى العنوان داخل الكارت (فى الصفحات التلاتة:
-            البحث، صفحة المعلن، إعلاناتى — لأن الكارت مصدر واحد). لو مفيش عنوان نرجع لنوع العقار. */}
+        {/* ↔ عنوان الإعلان بدل نوع العقار (شقة/فيلا...): سطر واحد بخط ثابت مقروء (12.5) — لو العنوان أطول من السطر يُقطع
+            بنقاط «…» دلالة على أنه غير مكتمل، بدل تصغير الخط تلقائيًا (كان يصل لـ 72% ويصير غير مقروء). فى الصفحات التلاتة:
+            البحث، صفحة المعلن، إدارة الحساب — لأن الكارت مصدر واحد. لو مفيش عنوان نرجع لنوع العقار. */}
         <Text
           style={styles.title}
           numberOfLines={1}
           ellipsizeMode="tail"
-          adjustsFontSizeToFit
-          minimumFontScale={0.72}
         >
           {item.shortTitle?.trim() || item.title?.trim() || t(item.type)}
         </Text>
@@ -85,6 +99,10 @@ function createStyles(themeColors: ThemeColors) {
     card: { flex: 1, backgroundColor: themeColors.card, borderRadius: 14, overflow: "hidden" },
     media: { height: AD_CARD_MEDIA_HEIGHT, position: "relative" },
     closedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.28)" },
+    inactiveOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
+    inactiveCenter: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+    inactivePill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(17,24,39,0.85)", borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10 },
+    inactivePillText: { color: "white", fontSize: 11.5, fontWeight: "900" },
     purposeBadge: { position: "absolute", top: 8, right: 8, borderRadius: 999, paddingVertical: 3, paddingHorizontal: 8 },
     purposeBadgeText: { color: "white", fontSize: 9.5, fontWeight: "900" },
     topStart: { position: "absolute", top: 8, left: 8, flexDirection: "row", gap: 6 },
@@ -98,7 +116,7 @@ function createStyles(themeColors: ThemeColors) {
     noteText: { fontSize: 10.5, fontWeight: "800", lineHeight: 16 },
     noteTextPending: { color: themeColors.isDark ? "#FCD34D" : "#92400E" },
     noteTextRejected: { color: themeColors.isDark ? "#FCA5A5" : "#991B1B" },
-    title: { fontSize: 12.5, fontWeight: "800", color: themeColors.text, marginBottom: 3 },
+    title: { fontSize: 12.5, lineHeight: 18, fontWeight: "800", color: themeColors.text, marginBottom: 3 },
     price: { fontSize: 13.5, fontWeight: "900", color: "#22A652", marginBottom: 4 },
     location: { fontSize: 10.5, color: themeColors.textSubtle, marginBottom: 6 },
     metaRow: { flexDirection: "row", gap: 8 },

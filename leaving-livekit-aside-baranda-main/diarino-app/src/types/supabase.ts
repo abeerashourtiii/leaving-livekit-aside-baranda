@@ -45,6 +45,177 @@ export type Database = {
         Update: { id?: boolean; require_reel_approval?: boolean; updated_at?: string; updated_by?: string | null }
         Relationships: []
       }
+      reel_plan_settings: {
+        Row: {
+          id: boolean
+          free_limit: number
+          plan1_extra: number
+          plan1_price_egp: number
+          plan2_extra: number
+          plan2_price_egp: number
+          period_days: number
+          grace_days: number
+          updated_at: string
+        }
+        Insert: {
+          id?: boolean
+          free_limit?: number
+          plan1_extra?: number
+          plan1_price_egp?: number
+          plan2_extra?: number
+          plan2_price_egp?: number
+          period_days?: number
+          grace_days?: number
+          updated_at?: string
+        }
+        Update: {
+          id?: boolean
+          free_limit?: number
+          plan1_extra?: number
+          plan1_price_egp?: number
+          plan2_extra?: number
+          plan2_price_egp?: number
+          period_days?: number
+          grace_days?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      reel_plan_orders: {
+        Row: {
+          id: string
+          user_id: string | null
+          payer_name: string | null
+          payer_phone: string | null
+          payer_email: string | null
+          plan: string
+          extra_reels: number
+          price_egp: number
+          period_days: number
+          status: string
+          payment_method: string | null
+          payment_sender_name: string | null
+          payment_contact_phone: string | null
+          payment_submitted_at: string | null
+          payment_ref: string | null
+          admin_note: string | null
+          payer_note: string | null
+          paid_at: string | null
+          starts_at: string | null
+          ends_at: string | null
+          grace_ends_at: string | null
+          created_at: string
+          handled_by: string | null
+          handled_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id?: string | null
+          payer_name?: string | null
+          payer_phone?: string | null
+          payer_email?: string | null
+          plan: string
+          extra_reels: number
+          price_egp: number
+          period_days: number
+          status?: string
+          payment_method?: string | null
+          payment_sender_name?: string | null
+          payment_contact_phone?: string | null
+          payment_submitted_at?: string | null
+          payment_ref?: string | null
+          admin_note?: string | null
+          payer_note?: string | null
+          paid_at?: string | null
+          starts_at?: string | null
+          ends_at?: string | null
+          grace_ends_at?: string | null
+          created_at?: string
+          handled_by?: string | null
+          handled_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string | null
+          payer_name?: string | null
+          payer_phone?: string | null
+          payer_email?: string | null
+          plan?: string
+          extra_reels?: number
+          price_egp?: number
+          period_days?: number
+          status?: string
+          payment_method?: string | null
+          payment_sender_name?: string | null
+          payment_contact_phone?: string | null
+          payment_submitted_at?: string | null
+          payment_ref?: string | null
+          admin_note?: string | null
+          payer_note?: string | null
+          paid_at?: string | null
+          starts_at?: string | null
+          ends_at?: string | null
+          grace_ends_at?: string | null
+          created_at?: string
+          handled_by?: string | null
+          handled_at?: string | null
+        }
+        Relationships: []
+      }
+      media_fingerprints: {
+        Row: {
+          id: string
+          owner_id: string
+          kind: "image" | "video" | "audio"
+          algo: "md5" | "sha256"
+          content_hash: string
+          size_bytes: number
+          url: string
+          public_id: string
+          thumbnail_url: string | null
+          width: number | null
+          height: number | null
+          duration: number | null
+          format: string | null
+          bytes: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          owner_id?: string
+          kind: "image" | "video" | "audio"
+          algo: "md5" | "sha256"
+          content_hash: string
+          size_bytes: number
+          url: string
+          public_id: string
+          thumbnail_url?: string | null
+          width?: number | null
+          height?: number | null
+          duration?: number | null
+          format?: string | null
+          bytes?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          owner_id?: string
+          kind?: "image" | "video" | "audio"
+          algo?: "md5" | "sha256"
+          content_hash?: string
+          size_bytes?: number
+          url?: string
+          public_id?: string
+          thumbnail_url?: string | null
+          width?: number | null
+          height?: number | null
+          duration?: number | null
+          format?: string | null
+          bytes?: number | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       request_offers: {
         Row: {
           chat_id: string | null
@@ -384,6 +555,7 @@ export type Database = {
         Row: {
           fee_egp: number
           fee_rent_egp: number
+          fees_enabled: boolean
           id: boolean
           notify_days: number
           pay_days: number
@@ -395,6 +567,7 @@ export type Database = {
         Insert: {
           fee_egp?: number
           fee_rent_egp?: number
+          fees_enabled?: boolean
           id?: boolean
           notify_days?: number
           pay_days?: number
@@ -406,6 +579,7 @@ export type Database = {
         Update: {
           fee_egp?: number
           fee_rent_egp?: number
+          fees_enabled?: boolean
           id?: boolean
           notify_days?: number
           pay_days?: number
@@ -1647,6 +1821,7 @@ export type Database = {
           finish_type: string | null
           floor: number | null
           id: string
+          is_active: boolean
           lat: number | null
           likes: number
           lng: number | null
@@ -1694,6 +1869,7 @@ export type Database = {
           finish_type?: string | null
           floor?: number | null
           id?: string
+          is_active?: boolean
           lat?: number | null
           likes?: number
           lng?: number | null
@@ -1741,6 +1917,7 @@ export type Database = {
           finish_type?: string | null
           floor?: number | null
           id?: string
+          is_active?: boolean
           lat?: number | null
           likes?: number
           lng?: number | null
@@ -2328,11 +2505,17 @@ export type Database = {
     }
     Functions: {
       admin_has_permission: { Args: { section: string }; Returns: boolean }
+      get_my_reel_quota: { Args: never; Returns: Json }
+      create_reel_plan_order: { Args: { p_plan: string }; Returns: Json }
+      confirm_reel_plan_payment: { Args: { p_id: string; p_method: string; p_sender_name: string; p_contact_phone: string }; Returns: Json }
+      cancel_reel_plan_order: { Args: { p_id: string }; Returns: undefined }
+      admin_list_reel_plan_orders: { Args: never; Returns: Json[] }
+      admin_update_reel_plan_order: { Args: { p_id: string; p_status: string; p_payment_ref?: string | null; p_admin_note?: string | null }; Returns: undefined }
       admin_list_users: { Args: never; Returns: Json }
       delete_my_account: { Args: never; Returns: undefined }
       admin_reply_to_report: { Args: { p_report_id: string; p_text: string }; Returns: number }
       admin_reply_to_suggestion: { Args: { p_suggestion_id: string; p_text: string }; Returns: undefined }
-      admin_pending_counts: { Args: never; Returns: { reels_pending: number; support_pending: number; deals_pending: number }[] }
+      admin_pending_counts: { Args: never; Returns: { reels_pending: number; support_pending: number; deals_pending: number; companies_pending: number }[] }
       increment_property_views: { Args: { p_property_id: string }; Returns: undefined }
       request_admin_account_deletion: { Args: never; Returns: string }
       cancel_admin_account_deletion_request: { Args: never; Returns: undefined }
@@ -2390,7 +2573,16 @@ export type Database = {
       mark_notification_read: { Args: { p_id: string }; Returns: undefined }
       report_property_deal: {
         Args: { p_deal_type: string; p_note?: string; p_property_id: string }
-        Returns: Database["public"]["Tables"]["property_deals"]["Row"]
+        Returns: {
+          id: string
+          property_id: string
+          deal_type: string
+          fee_egp: number
+          status: string
+          reported_at: string
+          due_at: string | null
+          fees_enabled: boolean
+        }
       }
       admin_list_deals: {
         Args: never

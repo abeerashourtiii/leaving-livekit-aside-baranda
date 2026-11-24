@@ -245,8 +245,17 @@ function ConfiguredRootLayout() {
               <Stack.Screen name="invoice" options={{ presentation: "modal" }} />
               {/* ↔ فاتورة الترويج المدفوع (افتتاحي / مميز) — app/promotion-invoice.tsx */}
               <Stack.Screen name="promotion-invoice" options={{ presentation: "modal" }} />
+              {/* ↔ فاتورة باقة الريلز الشهرية (app/reel-plan-invoice.tsx) */}
+              <Stack.Screen name="reel-plan-invoice" options={{ presentation: "modal" }} />
               {/* ↔ حجز المساحة الإعلانية (بانر القائمة/البحث) — app/ad-space.tsx */}
               <Stack.Screen name="ad-space" options={{ presentation: "modal" }} />
+              {/* ↔ قسم «الخدمات» (دليل الشركات): قائمة شركات نشاط / تفاصيل شركة / نموذج إضافة-تعديل / إدارة شركتي / فاتورة اشتراك الشركة */}
+              <Stack.Screen name="services/[category]" options={{ presentation: "modal" }} />
+              <Stack.Screen name="company/[id]" options={{ presentation: "modal" }} />
+              <Stack.Screen name="company-form" options={{ presentation: "modal" }} />
+              <Stack.Screen name="my-company" options={{ presentation: "modal" }} />
+              <Stack.Screen name="company-plan-invoice" options={{ presentation: "modal" }} />
+              <Stack.Screen name="featured-ads" options={{ presentation: "modal" }} />
               {/* ↔ وضع الإكمال الإجبارى (?onboarding=1): بدون سحب لإغلاق الشاشة على آيفون. */}
               <Stack.Screen
                 name="edit-profile"

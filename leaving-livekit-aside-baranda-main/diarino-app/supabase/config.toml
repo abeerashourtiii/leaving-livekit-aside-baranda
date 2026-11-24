@@ -11,6 +11,11 @@ verify_jwt = false
 [functions.send-push]
 verify_jwt = false
 
+# ↔ cloudinary-cleanup: تُستدعى من الجدولة (pg_cron/pg_net) بسر مشترك x-cleanup-secret أو من المشرف الرئيسى بجلسته؛ الدالة نفسها تتحقق من
+#   أحدهما قبل أى عمل (لا يوجد مسار بلا تحقق)، فبوابة JWT العامة تُعطَّل لها كى يمرّ استدعاء الجدولة بلا JWT مستخدم.
+[functions.cloudinary-cleanup]
+verify_jwt = false
+
 # ↔ سياسة كلمة المرور القوية (إصدار السياسات 18): 8 أحرف على الأقل + أحرف صغيرة وكبيرة + أرقام.
 # هذا الملف يضبط بيئة supabase المحلية/`supabase config push`. على المشروع المستضاف: Supabase Dashboard ← Authentication
 # ← Sign In / Providers ← Email ← Minimum password length = 8 و Password Requirements = "Lowercase, uppercase letters and digits".

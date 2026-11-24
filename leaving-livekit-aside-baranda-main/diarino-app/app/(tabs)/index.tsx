@@ -34,7 +34,7 @@ import { useReelSheetLocked } from "../../lib/reelSheetLock";
 import { prefetchReelPosters } from "../../lib/reelPrefetch";
 import { useForYouFeed } from "../../lib/hooks/useForYouFeed";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
-import { initRecommendation, trackSignal, usePersonalizationEnabled } from "../../lib/recommendation/store";
+import { initRecommendation, markNotInterested, trackSignal, usePersonalizationEnabled } from "../../lib/recommendation/store";
 
 // ↔ نافذة التحميل: بيتجهّز (player فيديو + بوستر + بيانات) 3 ريلز قبل الريل الشغّال و3 بعده بالظبط — مش كل الريلز.
 // أى ريل برّه النافذة دى بيتفك تمامًا (مفيش player ولا ذاكرة)، وكل ما الريل النشط يتغيّر النافذة بتتحرك معاه.
@@ -137,6 +137,8 @@ export default function ReelsScreen() {
   // (reason only, no link) — lands in the admin support center's
   // "الإبلاغات" tab alongside the full-link report from /property/[id].
   const [reportSheetProperty, setReportSheetProperty] = useState<Property | null>(null);
+  // ↔ «غير مهتم»: ريلز تُخفى فورًا من القائمة الحالية (وتُسجَّل فى ملف التوصية لتقليل المشابه مستقبلًا وعدم عودتها: lib/recommendation).
+  const [hiddenNowIds, setHiddenNowIds] = useState<Set<string>>(() => new Set());
   const [reportModalProperty, setReportModalProperty] = useState<Property | null>(null);
 
   // ↔ admin "الريلز المميزة" feature — an intro reel shown first on a
@@ -194,8 +196,9 @@ export default function ReelsScreen() {
       sponsoredIdByPropertyId.set(sponsorProperty.id, sponsor.id);
     });
 
+    if (hiddenNowIds.size) items = items.filter((p) => !hiddenNowIds.has(p.id));
     return { feedItems: items, sponsoredIdByPropertyId, introCount: introProperties.length };
-  }, [rankedProperties, sponsorProperties, sponsoredReels, filter.provinces, filter.regions]);
+  }, [rankedProperties, sponsorProperties, sponsoredReels, filter.provinces, filter.regions, hiddenNowIds]);
 
   // ↔ هل انتهى تحميل الإعلانات الممولة (وعقاراتها)؟ لا نستأنف آخر ريل قبل ذلك حتى لا تتزحزح القائمة تحت المستخدم عند وصول الافتتاحي.
   const sponsorsReady = sponsoredReelsStatus !== "pending" && (sponsorPropertyIds.length === 0 || sponsorPropertiesStatus !== "pending");
@@ -214,6 +217,16 @@ export default function ReelsScreen() {
   // بيعيد رسم الكارتين/التلاتة اللي isActive/isNearActive بتاعتهم اتغيّر بس.
   const activeIndexRef = useRef(0);
   activeIndexRef.current = activeIndex;
+  // ↔ بعد «غير مهتم» على آخر ريل: القائمة تقصر فنثبّت المؤشر على آخر ريل متاح بدل فراغ.
+  useEffect(() => {
+    if (feedItems.length > 0 && activeIndex >= feedItems.length) {
+      const last = feedItems.length - 1;
+      activeIndexRef.current = last;
+      setActiveIndex(last);
+      flatListRef.current?.scrollToOffset({ offset: reelHeight * last, animated: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedItems.length]);
 
   // ↔ بعد الرجوع من PiP: نرجّع الـ FlatList لمكان الريل النشط بالظبط (لو الشاشة اتغيّر حجمها فى النافذة
   // ممكن تكون اتزحزحت).
@@ -388,6 +401,18 @@ export default function ReelsScreen() {
     });
   }, []);
   const handleReport = useCallback((property: Property) => setReportSheetProperty(property), []);
+
+  // ↔ «مهتم» من قائمة خيارات الريل: إشارة صريحة قوية لخوارزمية «لك» (lib/recommendation: نوع/غرض/محافظة/معلن/سعر هذا الريل) + Toast.
+  function handleInterested(property: Property) {
+    trackSignal("interested", property);
+    showToast(personalized ? t("تم — سنعرض لك ريلز مشابهة") : t("تم — فعّل «التخصيص» من الإعدادات ليتعلّم التطبيق من اختياراتك"));
+  }
+  // ↔ «غير مهتم»: يُنزل أوزان خصائص الريل ويستبعده نهائيًا من ترتيبك، ويُخفى فورًا فيظهر الريل التالى مكانه (القائمة تُعاد بدون هذا الريل) + Toast.
+  function handleNotInterested(property: Property) {
+    const recorded = markNotInterested(property);
+    setHiddenNowIds((prev) => new Set(prev).add(property.id));
+    showToast(recorded ? t("تم — سنقلّل ظهور ريلز مشابهة") : t("تم إخفاء هذا الريل"));
+  }
   // ↔ #4 (تمرير تلقائي): بينتقل للريل اللي بعده أوتوماتيك لما الريل
   // النشط يخلص (فيديو وصل لنهايته أو سلايدشو خلّص دورة)، بس لو autoAdvance
   // مفعّل ومفيش ريل بعده يقف عنده (آخر عنصر فى القايمة).
@@ -526,6 +551,8 @@ export default function ReelsScreen() {
         onClose={() => setReportSheetProperty(null)}
         onOpenReport={() => setReportModalProperty(reportSheetProperty)}
         hasMusic={!!reportSheetProperty?.music}
+        onInterested={reportSheetProperty ? () => handleInterested(reportSheetProperty) : undefined}
+        onNotInterested={reportSheetProperty ? () => handleNotInterested(reportSheetProperty) : undefined}
       />
       <ReportModal
         visible={!!reportModalProperty}

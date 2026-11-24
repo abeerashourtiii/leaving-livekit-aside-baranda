@@ -128,12 +128,12 @@ export function NotificationsDropdown({ visible, onClose, filter, onSetFilter, i
           <View style={styles.filters}>
             {FILTERS.map((f) => (
               <Pressable key={f.key} style={[styles.filterChip, filter === f.key && styles.filterChipActive]} onPress={() => onSetFilter(f.key)}>
-                <Text style={[styles.filterChipText, filter === f.key && styles.filterChipTextActive]}>{isEn ? EN_FILTER_LABELS[f.key] : t(f.label)}</Text>
+                <Text style={[styles.filterChipText, filter === f.key && styles.filterChipTextActive]} numberOfLines={1}>{isEn ? EN_FILTER_LABELS[f.key] : t(f.label)}</Text>
               </Pressable>
             ))}
           </View>
           <Pressable style={styles.markAllBtn} onPress={onMarkAllRead}>
-            <Text style={styles.markAllBtnText}>{t("تحديد الكل كمقروء")}</Text>
+            <Text style={styles.markAllBtnText} numberOfLines={1}>{t("تحديد الكل كمقروء")}</Text>
           </Pressable>
         </View>
 
@@ -192,14 +192,15 @@ function createStyles(themeColors: ThemeColors) {
     header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: themeColors.border },
     headerTitle: { fontSize: 16, fontWeight: "900", color: themeColors.text },
     closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: themeColors.surface, alignItems: "center", justifyContent: "center" },
-    toolbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10, gap: 8, borderBottomWidth: 1, borderBottomColor: themeColors.border },
-    filters: { flexDirection: "row", gap: 6 },
+    // ↔ flexWrap: لو ما كفّتش العرض (شاشات ~360px أو خط نظام كبير) ينزل «تحديد الكل كمقروء» لسطر تحت الفلاتر كاملًا بدل اقتطاع كلمة «كمقروء».
+    toolbar: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10, columnGap: 8, rowGap: 6, borderBottomWidth: 1, borderBottomColor: themeColors.border },
+    filters: { flexDirection: "row", gap: 6, flexShrink: 0 },
     filterChip: { backgroundColor: themeColors.surface, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 },
     filterChipActive: { backgroundColor: "#22A652" },
     filterChipText: { fontSize: 11.5, fontWeight: "800", color: themeColors.textMuted },
     filterChipTextActive: { color: "white" },
-    markAllBtn: { paddingVertical: 6, paddingHorizontal: 8 },
-    markAllBtnText: { fontSize: 11.5, fontWeight: "800", color: "#22A652" },
+    markAllBtn: { paddingVertical: 6, paddingHorizontal: 4, flexShrink: 0 },
+    markAllBtnText: { fontSize: 12, fontWeight: "800", color: "#22A652" },
     dayHeader: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6, backgroundColor: themeColors.card },
     dayHeaderText: { fontSize: 12, fontWeight: "900", color: themeColors.textSubtle },
     item: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 11, paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: themeColors.border },

@@ -12,6 +12,7 @@ import { useLanguage } from "../../lib/hooks/useLanguage";
 import { ReportModal } from "../../components/shared/ReportModal";
 import { PropertyDetailsContent } from "../../components/property/PropertyDetailsContent";
 import { PropertyCtaBar } from "../../components/property/PropertyCtaBar";
+import { FeaturedAdsStrip } from "../../components/featured/FeaturedAdsStrip";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 import { useSheetDragToClose } from "../../lib/hooks/useSheetDragToClose";
 
@@ -125,6 +126,9 @@ function PropertyDetailsBody() {
         </View>
 
         <PropertyDetailsContent property={property} />
+
+        {/* ↔ «إعلانات مميزة» أسفل الصفحة (بعد المحتوى؛ أزرار الاتصال/الواتساب فى الشريط الثابت أسفل الشاشة) — بدون هذا الإعلان نفسه. */}
+        <FeaturedAdsStrip filters={{ excludePropertyId: property.id }} style={{ paddingHorizontal: 18, marginTop: 4 }} />
       </ScrollView>
 
       {/* ↔ the fixed CTA bar fix — lives outside the ScrollView on purpose */}

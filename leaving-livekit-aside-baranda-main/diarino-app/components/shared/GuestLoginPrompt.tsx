@@ -7,7 +7,7 @@ import { useThemeColors } from "../../lib/hooks/useThemeColors";
 // promptGuestLogin() (lib/guestGate.ts) — Modal أصلى من React Native فبيشتغل على أندرويد/آيفون/الويب/APK
 // بنفس الشكل (Alert.alert مبيشتغلش على الويب). الضيف مبيتسجّلش خروج إلا لو ضغط «تسجيل الدخول»؛
 // «ليس الآن» بيقفل النافذة ويكمل تصفّحه فى التطبيق زى ما هو.
-export type GuestPromptKind = "listing" | "request" | "generic";
+export type GuestPromptKind = "listing" | "request" | "company" | "generic";
 type PromptState = { visible: boolean; kind: GuestPromptKind; onConfirm: (() => void) | null };
 
 let state: PromptState = { visible: false, kind: "generic", onConfirm: null };
@@ -43,7 +43,9 @@ export function GuestLoginPromptHost() {
       ? t("يجب تسجيل الدخول أولًا قبل نشر عقار.")
       : snap.kind === "request"
         ? t("يجب تسجيل الدخول أولًا قبل طلب عقار.")
-        : t("يجب تسجيل الدخول أولًا قبل نشر عقار أو طلب عقار.");
+        : snap.kind === "company"
+          ? t("يجب تسجيل الدخول بحساب Google أو بريد إلكتروني قبل إضافة شركتك.")
+          : t("يجب تسجيل الدخول أولًا قبل نشر عقار أو طلب عقار.");
 
   function confirm() {
     const cb = snap.onConfirm;

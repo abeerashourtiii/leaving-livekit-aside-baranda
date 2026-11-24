@@ -1,3 +1,4 @@
+import { ReelQuotaCard } from "../../components/account/ReelQuotaCard";
 import { adWindow, requestWindow, formatRemaining } from "../../lib/adWindow";
 import { KeyboardAvoid } from "../../components/shared/KeyboardAvoid";
 import { useOffersTopBar } from "../../lib/hooks/useOffersTopBar";
@@ -39,6 +40,7 @@ import { useLogMedia } from "../../lib/hooks/useMedia";
 import { useDrafts, useDraftMutations } from "../../lib/hooks/useDrafts";
 import { useFeatureFlag } from "../../lib/hooks/useFeatureFlags";
 import { useMyDeals } from "../../lib/hooks/useDeals";
+import { MyCompanyCard } from "../../components/account/MyCompanyCard";
 import { useMyPromotions, livePromotionsFor } from "../../lib/hooks/usePromotions";
 
 type AccountTab = "ads" | "requests" | "lives" | "favorites" | "drafts";
@@ -257,6 +259,9 @@ export default function AccountScreen() {
           <Text style={styles.bioText}>{bio || t("اضغط لإضافة نبذة عنك ...")}</Text>
         </Pressable>
 
+        {/* ↔ «إدارة شركتي» (قسم الخدمات): يظهر لصاحب شركة مسجّلة فقط */}
+        <MyCompanyCard />
+
         <View style={styles.tabs}>
           <TabBtn active={activeTab === "ads"} label="إعلاناتي" count={myAds.length} onPress={() => setActiveTab("ads")} icon={AdsIcon} />
           <TabBtn active={activeTab === "requests"} label="طلباتي" count={myRequests.length} onPress={() => setActiveTab("requests")} icon={RequestsIcon} />
@@ -268,6 +273,8 @@ export default function AccountScreen() {
         </View>
 
         <View style={styles.content}>
+          {/* ↔ عدّاد الريلز (المستخدمة / الحد) وحالة الباقة الشهرية وتاريخ انتهائها + ترقية/تجديد (components/account/ReelQuotaCard.tsx) */}
+          {activeTab === "ads" && <ReelQuotaCard />}
           {activeTab === "ads" && (
             adsLoading && myAds.length === 0 ? (
               <View style={{ paddingVertical: 40, alignItems: "center" }}><ActivityIndicator color="#22A652" /></View>
@@ -329,10 +336,10 @@ export default function AccountScreen() {
                                 return { tone: "pending" as const, text: `${t("ترويج")} ${kindLabel}: ${t("بانتظار السداد — اضغط ⋮ ثم «اجعل الإعلان افتتاحي أو مميز».")}` };
                               })()
                             : (() => {
-                                // ↔ إعلان منشور داخل نافذة الـ 24 ساعة: نوضّح للمعلن الوقت المتبقى للتعديل والحذف.
+                                // ↔ إعلان منشور داخل نافذة الـ 24 ساعة: نوضّح للمعلن الوقت المتبقى للتعديل (الحذف متاح فى أى وقت).
                                 const w = adWindow(ad);
                                 return w.published && w.remainingMs != null && w.remainingMs > 0 && !ad.closedType
-                                  ? { tone: "info" as const, text: `${t("يمكنك تعديل إعلانك أو حذفه خلال")} ${formatRemaining(w.remainingMs, language)}` }
+                                  ? { tone: "info" as const, text: `${t("يمكنك تعديل إعلانك خلال")} ${formatRemaining(w.remainingMs, language)}` }
                                   : undefined;
                               })()
                         }

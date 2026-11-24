@@ -11,6 +11,8 @@ import { showToast } from "../shared/Toast";
 // (يختفى من الريلز والبحث، ويبقى فى «إعلاناتى» وصفحة المعلن بشارة «تم البيع/تم الإيجار»).
 // رسوم الخدمة: 1000 ج.م للبيع و500 ج.م للإيجار — على البائع/المؤجّر أو الوسيط وحده، ولا شيء على المشتري/المستأجر.
 // بعد التسجيل تظهر فاتورة السداد عبر إنستاباي (app/invoice.tsx).
+// ↔ لما الرسوم معطّلة من لوحة الأدمن (deal_settings.fees_enabled = false — الوضع الحالى: الخدمة مجانية) الخاصية تبقى كما هى
+//   (يُغلق الإعلان وتظهر شارة «تم البيع/تم الإيجار») لكن بدون رسم ولا فاتورة ولا تحويل لصفحة الفاتورة.
 type Props = { visible: boolean; ad: Property | null; onClose: () => void };
 
 function formatDate(iso: string | null | undefined, locale: string): string {
@@ -28,7 +30,7 @@ export function DealReportModal({ visible, ad, onClose }: Props) {
   const styles = createStyles(themeColors);
   const { settings, known: feeKnown } = useDealSettings();
   const report = useReportDeal();
-  const [done, setDone] = useState<{ dueAt: string | null } | null>(null);
+  const [done, setDone] = useState<{ dueAt: string | null; free: boolean } | null>(null);
 
   // الحالة بتتصفّر كل مرة النافذة تتفتح.
   useEffect(() => {
@@ -41,6 +43,8 @@ export function DealReportModal({ visible, ad, onClose }: Props) {
   const dealType: DealType = ad.purpose === "rent" ? "rent" : "sale";
   const isRent = dealType === "rent";
   // ↔ لو تعذّر تحميل الإعدادات لا نعرض رقمًا افتراضيًا (قد لا يطابق الفعلى)؛ الخادم هو من يسجّل الرسم الفعلى عند التأكيد.
+  // ↔ الرسوم معطّلة (خدمة مجانية): نعتمد على الإعداد المقروء من الخادم؛ والرد الفعلى من الخادم بعد التأكيد هو الحاكم (راجع onSuccess).
+  const freeMode = feeKnown && !settings.feesEnabled;
   const fee = feeKnown ? feeForDealType(settings, dealType).toLocaleString(language === "ar" ? "ar-EG" : "en-US") : "—";
   // ↔ «من يتحمله»: صاحب الإعلان (بدل «البائع/المؤجّر/الوسيط (أنت)») — الرسوم على صاحب الإعلان وحده.
   const payerLabel = t("صاحب الإعلان");
@@ -52,7 +56,8 @@ export function DealReportModal({ visible, ad, onClose }: Props) {
       { propertyId: ad.id, dealType },
       {
         onSuccess: (row) => {
-          setDone({ dueAt: row?.due_at ?? null });
+          const free = row?.fees_enabled === false || row?.status === "waived" || (row?.fees_enabled === undefined && freeMode);
+          setDone({ dueAt: row?.due_at ?? null, free });
           showToast(isRent ? t("تم تسجيل التأجير") : t("تم تسجيل البيع"));
         },
         onError: (err) => {
@@ -88,33 +93,60 @@ export function DealReportModal({ visible, ad, onClose }: Props) {
               <Text style={styles.text}>
                 {t("أُغلق إعلانك: لن يظهر في الريلز والبحث، ويبقى في إعلاناتي وصفحتك بشارة")} {isRent ? t("تم الإيجار") : t("تم البيع")}.
               </Text>
-              <View style={styles.infoBox}>
-                <Row styles={styles} k={t("فاتورة رسوم الخدمة")} v={`${fee} ${t("جنيه")}`} strong />
-                {done.dueAt ? <Row styles={styles} k={t("آخر موعد للسداد")} v={formatDate(done.dueAt, language === "ar" ? "ar-EG" : "en-US")} /> : null}
-                <Text style={styles.infoText}>{t("يتم السداد عبر إنستاباي، ثم تؤكد السداد من صفحة الفاتورة.")}</Text>
-              </View>
-              <Pressable style={styles.confirmBtn} onPress={openInvoice}>
-                <Text style={styles.confirmBtnText}>{t("عرض الفاتورة والسداد")}</Text>
-              </Pressable>
-              <Pressable style={[styles.cancelBtn, { marginTop: 8, flex: 0 }]} onPress={onClose}>
-                <Text style={styles.cancelBtnText}>{t("لاحقًا")}</Text>
-              </Pressable>
+              {done.free ? (
+                <>
+                  <View style={styles.infoBox}>
+                    <Row styles={styles} k={t("رسوم الخدمة")} v={t("مجانية حاليًا")} strong />
+                    <Text style={styles.infoText}>{t("لا توجد فاتورة ولا رسوم على هذه الصفقة.")}</Text>
+                  </View>
+                  <Pressable style={styles.confirmBtn} onPress={onClose}>
+                    <Text style={styles.confirmBtnText}>{t("تم")}</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <View style={styles.infoBox}>
+                    <Row styles={styles} k={t("فاتورة رسوم الخدمة")} v={`${fee} ${t("جنيه")}`} strong />
+                    {done.dueAt ? <Row styles={styles} k={t("آخر موعد للسداد")} v={formatDate(done.dueAt, language === "ar" ? "ar-EG" : "en-US")} /> : null}
+                    <Text style={styles.infoText}>{t("يتم السداد عبر إنستاباي، ثم تؤكد السداد من صفحة الفاتورة.")}</Text>
+                  </View>
+                  <Pressable style={styles.confirmBtn} onPress={openInvoice}>
+                    <Text style={styles.confirmBtnText}>{t("عرض الفاتورة والسداد")}</Text>
+                  </Pressable>
+                  <Pressable style={[styles.cancelBtn, { marginTop: 8, flex: 0 }]} onPress={onClose}>
+                    <Text style={styles.cancelBtnText}>{t("لاحقًا")}</Text>
+                  </Pressable>
+                </>
+              )}
             </ScrollView>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false}>
               <Text style={styles.title}>{isRent ? t("تم الإيجار") : t("تم البيع")}</Text>
               <Text style={styles.text}>{`«${t(ad.shortTitle || ad.title)}»`}</Text>
 
-              <View style={styles.infoBox}>
-                <Row styles={styles} k={t("رسوم الخدمة")} v={`${fee} ${t("جنيه")}`} strong />
-                <Row styles={styles} k={t("من يتحمله")} v={payerLabel} />
-                <Row styles={styles} k={otherLabel} v={t("لا يدفع أي رسم")} />
-                <Row styles={styles} k={t("مهلة السداد")} v={`${settings.payDays} ${t("أيام")}`} />
-              </View>
+              {freeMode ? (
+                <>
+                  <View style={styles.infoBox}>
+                    <Row styles={styles} k={t("رسوم الخدمة")} v={t("مجانية حاليًا")} strong />
+                  </View>
+                  <Text style={styles.small}>
+                    {t("الخدمة مجانية حاليًا: بعد التأكيد يُغلق الإعلان ويختفي من الريلز والبحث (ويبقى في إعلاناتي وصفحتك بشارة «تم البيع/تم الإيجار»)، دون أي رسوم أو فاتورة.")}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <View style={styles.infoBox}>
+                    <Row styles={styles} k={t("رسوم الخدمة")} v={`${fee} ${t("جنيه")}`} strong />
+                    <Row styles={styles} k={t("من يتحمله")} v={payerLabel} />
+                    <Row styles={styles} k={otherLabel} v={t("لا يدفع أي رسم")} />
+                    <Row styles={styles} k={t("مهلة السداد")} v={`${settings.payDays} ${t("أيام")}`} />
+                  </View>
 
-              <Text style={styles.small}>
-                {t("بعد التأكيد يُغلق الإعلان ويختفي من الريلز والبحث (ويبقى في إعلاناتي وصفحتك)، وتُصدر فاتورة رسوم الخدمة لسدادها عبر إنستاباي. لا يجوز تحميل الرسم على المشتري أو المستأجر.")}
-              </Text>
+                  <Text style={styles.small}>
+                    {t("بعد التأكيد يُغلق الإعلان ويختفي من الريلز والبحث (ويبقى في إعلاناتي وصفحتك)، وتُصدر فاتورة رسوم الخدمة لسدادها عبر إنستاباي. لا يجوز تحميل الرسم على المشتري أو المستأجر.")}
+                  </Text>
+                </>
+              )}
 
               {/* ↔ بدون إقرار منفصل: التأكيد يخضع للشروط وسياسة البيع والرسوم اللى وافق عليها المستخدم. رابط السياسة للاطلاع فقط. */}
               <Text style={styles.link} onPress={openPolicy}>{t("سياسة البيع والرسوم")}</Text>

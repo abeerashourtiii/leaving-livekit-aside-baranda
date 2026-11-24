@@ -5,7 +5,7 @@ import { ActionSheet, ActionSheetItem } from "../shared/ActionSheet";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { showToast } from "../shared/Toast";
 import { Property } from "../../lib/types";
-import { MAX_PINNED_PROPERTIES, useDeleteProperty, useTogglePinProperty } from "../../lib/hooks/useProperties";
+import { MAX_PINNED_PROPERTIES, useDeleteProperty, useSetPropertyActive, useTogglePinProperty } from "../../lib/hooks/useProperties";
 import { useLanguage } from "../../lib/hooks/useLanguage";
 import { useCurrentUser } from "../../lib/hooks/useCurrentUser";
 import { useMyDeals, DEAL_STATUS_LABELS } from "../../lib/hooks/useDeals";
@@ -37,6 +37,7 @@ export function AdActionSheet({ visible, ad, pinnedCount, onClose }: Props) {
   const [pendingDelete, setPendingDelete] = useState<Property | null>(null);
   const deleteProperty = useDeleteProperty();
   const togglePin = useTogglePinProperty();
+  const setActive = useSetPropertyActive();
 
   const maxPinnedMsg = t("الحد الأقصى ٣ إعلانات مثبتة — ألغِ تثبيت إعلان آخر أولًا");
 
@@ -55,6 +56,35 @@ export function AdActionSheet({ visible, ad, pinnedCount, onClose }: Props) {
     );
   }
 
+  // ↔ «غير نشط» / «تنشيط الإعلان»: يوقف ظهور الإعلان فى البحث وصفحة المعلن والريلز (يبقى فى إعلاناتي)، أو يعيده. العين المشطوبة = سيُصبح غير مرئى بالضغط،
+  //   والعين العادية = سيعود النشر بالضغط. متاح فى أى وقت (لا يرتبط بنافذة الـ 24 ساعة) ويبقى محسوبًا فى حد الريلز.
+  function handleToggleActive(target: Property) {
+    const nextActive = target.isActive === false; // كان غير نشط ← نُنشّطه
+    setActive.mutate(
+      { id: target.id, active: nextActive },
+      {
+        onSuccess: () => showToast(nextActive ? t("تم تنشيط الإعلان وعاد ظهوره في البحث وصفحة المعلن") : t("تم إيقاف نشر الإعلان — لن يراه أحد غيرك حتى تنشّطه")),
+        onError: () => showToast(t("تعذر تحديث حالة الإعلان، حاول مرة أخرى")),
+      }
+    );
+  }
+  const activeItem = (target: Property): ActionSheetItem => {
+    const inactive = target.isActive === false;
+    return {
+      key: "active",
+      label: inactive ? t("تنشيط الإعلان") : t("غير نشط"),
+      icon: (p) => (
+        <Path
+          {...p}
+          d={inactive
+            ? "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 100 6 3 3 0 000-6z"
+            : "M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24M1 1l22 22"}
+        />
+      ),
+      onPress: () => handleToggleActive(target),
+    };
+  };
+
   const deleteItem = (target: Property): ActionSheetItem => ({
     key: "delete",
     label: t("حذف الإعلان"),
@@ -63,10 +93,10 @@ export function AdActionSheet({ visible, ad, pinnedCount, onClose }: Props) {
     onPress: () => setTimeout(() => setPendingDelete(target), AFTER_SHEET_CLOSE_MS),
   });
 
-  // ↔ نافذة الـ 24 ساعة من أول نشر (lib/adWindow.ts + migration 20261021000000): بعدها الحذف زر مختفى (للمشرفين فقط) والتعديل مقفول.
+  // ↔ الحذف متاح للمعلن فى أى وقت (لم يعد مرتبطًا بنافذة الـ 24 ساعة)؛ هذا العنصر احتياطى فقط ولا يظهر عمليًا.
   const lockedItem = (): ActionSheetItem => ({
     key: "locked",
-    label: t("انتهت مدة التعديل والحذف (24 ساعة من النشر). الحذف من حق المشرفين."),
+    label: t("انتهت مدة التعديل (24 ساعة من النشر)."),
     disabled: true,
     icon: (p) => <Path {...p} d="M5 11h14v10H5zM8 11V7a4 4 0 018 0v4" />,
   });
@@ -145,6 +175,7 @@ export function AdActionSheet({ visible, ad, pinnedCount, onClose }: Props) {
       icon: (p) => <Path {...p} d="M20 6L9 17l-5-5" />,
       onPress: () => setTimeout(() => setPendingDeal(ad), AFTER_SHEET_CLOSE_MS),
     },
+    activeItem(ad),
     win?.deletable ? deleteItem(ad) : lockedItem(),
   ];
 
@@ -156,7 +187,7 @@ export function AdActionSheet({ visible, ad, pinnedCount, onClose }: Props) {
       <ConfirmModal
         visible={!!pendingDelete}
         title={t("حذف الإعلان")}
-        text={pendingDelete ? `${t("هل أنت متأكد من حذف")} "${t(pendingDelete.shortTitle || pendingDelete.title)}"؟ ${t("لا يمكن التراجع عن هذا الإجراء.")}` : ""}
+        text={pendingDelete ? `${t("هل أنت متأكد من حذف")} "${t(pendingDelete.shortTitle || pendingDelete.title)}"؟ ${t("يُحذف الإعلان نهائيًا من التطبيق مع صوره وفيديوهاته، ويُتاح مكانه لإعلان جديد. لا يمكن التراجع عن هذا الإجراء.")}` : ""}
         confirmLabel={t("حذف")}
         danger
         onCancel={() => setPendingDelete(null)}

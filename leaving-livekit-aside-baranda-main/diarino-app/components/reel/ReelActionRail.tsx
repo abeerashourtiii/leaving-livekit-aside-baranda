@@ -65,6 +65,17 @@ function CompareIcon({ active }: { active: boolean }) {
   );
 }
 
+// ↔ زر «المزيد» (••• أفقية) — آخر زر فى العمود الجانبى، يفتح نفس قائمة الخيارات التى تفتح بالضغط المطوّل (ReelOptionsSheet).
+function MoreIcon() {
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24" fill="white">
+      <Circle cx={5} cy={12} r={2} />
+      <Circle cx={12} cy={12} r={2} />
+      <Circle cx={19} cy={12} r={2} />
+    </Svg>
+  );
+}
+
 function FollowGlyph({ following }: { following: boolean }) {
   return following ? (
     <Svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3}>
@@ -107,13 +118,15 @@ type Props = {
   onShare: () => void;
   onToggleSave: () => void;
   onToggleCompare: () => void;
+  /** يفتح قائمة الخيارات (نفس الضغط المطوّل). بدونه لا يظهر الزر. */
+  onMore?: () => void;
 };
 
 export function ReelActionRail({
   seller, likes, comments, liked, saved, following, comparing,
-  onOpenSeller, onToggleFollow, onToggleLike, onOpenComments, onShare, onToggleSave, onToggleCompare,
+  onOpenSeller, onToggleFollow, onToggleLike, onOpenComments, onShare, onToggleSave, onToggleCompare, onMore,
 }: Props) {
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
   const isAr = language !== "en";
   // ↔ إصلاح "شغّالة يمين/شمال صح على الويب بس، مش على أندرويد/آيفون" —
   // شوف شرح physicalSide() فى lib/rtl.ts. عايزين الأيقونات تظهر فعليًا
@@ -158,6 +171,12 @@ export function ReelActionRail({
       <Pressable style={styles.actionBtn} onPress={onToggleCompare} hitSlop={8}>
         <CompareIcon active={comparing} />
       </Pressable>
+
+      {onMore ? (
+        <Pressable style={styles.actionBtn} onPress={onMore} hitSlop={8} accessibilityRole="button" accessibilityLabel={t("المزيد")}>
+          <MoreIcon />
+        </Pressable>
+      ) : null}
     </View>
   );
 }

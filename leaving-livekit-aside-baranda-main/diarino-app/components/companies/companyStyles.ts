@@ -1,0 +1,62 @@
+import { StyleSheet } from "react-native";
+import type { ThemeColors } from "../../lib/hooks/useThemeColors";
+
+// أنماط مشتركة لشاشات قسم «الخدمات» (قائمة الشركات، التفاصيل، النموذج، إدارة شركتى، الفاتورة) — بنفس روح شاشات المساحة الإعلانية.
+export const SERVICES_GREEN = "#0B6B35";
+export const SERVICES_GREEN_LIGHT = "#22A652";
+
+export function createCompanyStyles(c: ThemeColors) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.border },
+    closeBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: c.surface },
+    headerTitle: { flex: 1, textAlign: "center", fontSize: 15, fontWeight: "800", color: c.text, paddingHorizontal: 8 },
+    content: { padding: 16, gap: 14 },
+    card: { backgroundColor: c.card, borderRadius: 16, padding: 16, gap: 10, borderWidth: 1, borderColor: c.border },
+    okCard: { borderColor: SERVICES_GREEN_LIGHT },
+    warnCard: { borderColor: "#F59E0B", backgroundColor: c.isDark ? "rgba(245,158,11,0.12)" : "#FFFBEB" },
+    badCard: { borderColor: "#DC2626" },
+    sectionTitle: { fontSize: 14.5, fontWeight: "900", color: c.text },
+    paragraph: { fontSize: 13.5, lineHeight: 22, color: c.text, fontWeight: "500" },
+    small: { fontSize: 11.5, color: c.textSubtle, lineHeight: 18 },
+    okTitle: { fontSize: 14.5, fontWeight: "900", color: "#15803D" },
+    warnTitle: { fontSize: 14.5, fontWeight: "900", color: "#B45309" },
+    badTitle: { fontSize: 14.5, fontWeight: "900", color: "#DC2626" },
+    label: { fontSize: 12.5, fontWeight: "800", color: c.textMuted },
+    required: { color: "#DC2626" },
+    input: { borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, color: c.text },
+    inputMulti: { minHeight: 110, textAlignVertical: "top" },
+    inputError: { borderColor: "#DC2626" },
+    select: { borderWidth: 1, borderColor: c.border, backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+    selectText: { flex: 1, fontSize: 14, color: c.text, fontWeight: "600" },
+    selectPlaceholder: { color: c.textSubtle, fontWeight: "500" },
+    primaryBtn: { borderRadius: 999, paddingVertical: 13, alignItems: "center", backgroundColor: SERVICES_GREEN_LIGHT },
+    primaryBtnText: { color: "white", fontSize: 14, fontWeight: "900", textAlign: "center" },
+    outlineBtn: { borderRadius: 999, paddingVertical: 12, alignItems: "center", borderWidth: 1.5, borderColor: SERVICES_GREEN_LIGHT, backgroundColor: "transparent" },
+    outlineBtnText: { color: SERVICES_GREEN_LIGHT, fontSize: 14, fontWeight: "900" },
+    dangerBtn: { borderRadius: 999, paddingVertical: 12, alignItems: "center", borderWidth: 1.5, borderColor: "#DC2626" },
+    dangerBtnText: { color: "#DC2626", fontSize: 14, fontWeight: "900" },
+    btnDisabled: { opacity: 0.5 },
+    whatsBtn: { flex: 1, borderRadius: 999, paddingVertical: 12, alignItems: "center", backgroundColor: "#25D366" },
+    callBtn: { flex: 1, borderRadius: 999, paddingVertical: 12, alignItems: "center", backgroundColor: SERVICES_GREEN_LIGHT },
+    actionBtnText: { color: "white", fontSize: 14, fontWeight: "900" },
+    row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 },
+    rowKey: { fontSize: 12.5, color: c.textSubtle, fontWeight: "700" },
+    rowValWrap: { flex: 1, alignItems: "flex-end" },
+    rowVal: { fontSize: 12.5, color: c.text, fontWeight: "800", textAlign: "right" },
+    rowValStrong: { color: SERVICES_GREEN_LIGHT, fontSize: 16 },
+    link: { color: SERVICES_GREEN_LIGHT, fontWeight: "800", textDecorationLine: "underline", fontSize: 13 },
+    linkBtn: { alignItems: "center", paddingVertical: 6 },
+    dangerLink: { color: "#DC2626", fontWeight: "800", textDecorationLine: "underline", fontSize: 13 },
+    chip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: c.border, backgroundColor: c.surface },
+    chipOn: { borderColor: SERVICES_GREEN_LIGHT, backgroundColor: c.isDark ? "rgba(34,166,82,0.18)" : "#ecfdf3" },
+    chipText: { fontSize: 12, fontWeight: "800", color: c.textMuted },
+    chipTextOn: { color: "#15803D" },
+    modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+    modalSheet: { backgroundColor: c.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "78%", paddingBottom: 12 },
+    modalTitle: { fontSize: 15, fontWeight: "900", color: c.text, textAlign: "center", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.border },
+    modalItem: { paddingVertical: 14, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+    modalItemText: { flex: 1, fontSize: 14, color: c.text, fontWeight: "600" },
+    modalItemOn: { color: SERVICES_GREEN_LIGHT, fontWeight: "900" },
+  });
+}

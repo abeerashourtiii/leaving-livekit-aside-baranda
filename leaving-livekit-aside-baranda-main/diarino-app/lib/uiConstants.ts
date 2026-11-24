@@ -1,6 +1,6 @@
-import { useRef } from "react";
+import { createContext, useContext, useRef } from "react";
 import { useWindowDimensions } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaFrame, useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePiPActive } from "./pipState";
 
 // ↔ يعكس بالظبط قيم app/(tabs)/_floating-tab-bar.tsx: `bottom: insets.bottom + 14`
@@ -28,14 +28,38 @@ export const REEL_SEEK_BAR_GAP = 6;
 // كده مفيش أي جزء من ريل تانى يبان أبدًا. عشان نسيب مساحة لشريط المهام
 // العائم فوق الريل، العناصر التفاعلية السفلية بس (شريط الـ seek/أيقونات
 // الجانب/كارت الوصف) هي اللي بتاخد padding/bottom إضافي — مش الكارت كله.
+// ↔ ⚠ إصلاح جذرى لشريط الـ seek (والوصف وأزرار الجانب) اللى كان يظهر *تحت* شريط التنقل على أندرويد:
+// `useWindowDimensions().height` على أندرويد (شريط تنقل نظام ثلاثى الأزرار/غير شفاف) أكبر من المساحة المرئية الفعلية للتطبيق بمقدار
+// ارتفاع شريط تنقل النظام (≈47dp على هاتف المستخدم)، فكان كارت الريل أطول من الشاشة المرئية ويُقصّ جزؤه السفلى تحت شريط النظام،
+// وكل العناصر المثبّتة بـ bottom (seek/وصف/أيقونات) تنزل نفس المقدار فتغطيها حبّة شريط التنقل العائم (الذى يتموضع صح بالنسبة للمساحة المرئية).
+// الارتفاع الحقيقى للمساحة المرئية = إطار SafeAreaProvider (useSafeAreaFrame: يقاس من الـ root view نفسه). نستخدم الأصغر بين الاثنين،
+// ونتجاهل الانكماش الكبير للإطار (الكيبورد: adjustResize يصغّر الـ root view) كى لا ينكمش الكارت عند الكتابة؛
+// وإذا تغيّر ارتفاع النافذة (دوران/تقسيم شاشة/شريط عنوان متصفح الويب) نعيد القياس. آيفون/ويب: الإطار = النافذة فلا تغيّر.
+const reelViewport = { win: 0, frame: 0 };
+
+// ↔ الـ Modal (مثل SponsoredAdReelModal) نافذة مستقلة بـ statusBarTranslucent تغطى الشاشة كلها، فارتفاعها = ارتفاع النافذة لا إطار الـ root:
+// هناك نستخدم قيمة النافذة كما كانت (لا فجوة سوداء أسفل المودال). الافتراضى "frame" لشاشات التطبيق العادية (تبويب الريلز وشاشة الريل).
+export type ReelHeightSource = "frame" | "window";
+export const ReelHeightSourceContext = createContext<ReelHeightSource>("frame");
+
 export function useReelHeight(): number {
   const { height } = useWindowDimensions();
+  const frame = useSafeAreaFrame();
+  const source = useContext(ReelHeightSourceContext);
+  if (reelViewport.win !== height) {
+    reelViewport.win = height;
+    reelViewport.frame = 0;
+  }
+  // آخر قيمة معقولة للإطار (≥ 80% من النافذة: أشرطة النظام لا تتجاوز ~15%)؛ أى انكماش أكبر هو الكيبورد (adjustResize) فنتجاهله.
+  // لا نستخدم "أكبر قيمة" لأن القيمة الأولية للإطار قد تأتى خاطئة (أكبر) قبل أول قياس فعلى.
+  if (frame.height >= height * 0.8) reelViewport.frame = frame.height;
+  const visible = source === "frame" && reelViewport.frame > 0 ? Math.min(height, Math.round(reelViewport.frame)) : height;
   // ↔ أثناء PiP نافذة النظام بتصغّر الشاشة، فبنثبّت آخر ارتفاع طبيعى — غير كده الـ FlatList
   // (pagingEnabled + getItemLayout) بتعيد حساب مكانها وبتقفز لريل تانى والنافذة العائمة تفقد الريل.
   const pip = usePiPActive();
-  const normalHeight = useRef(height);
-  if (!pip) normalHeight.current = height;
-  return pip ? normalHeight.current : height;
+  const normalHeight = useRef(visible);
+  if (!pip) normalHeight.current = visible;
+  return pip ? normalHeight.current : visible;
 }
 
 // ↔ المسافة اللي لازم تتحط bottom offset بيها لأي عنصر تفاعلي عائم جوه

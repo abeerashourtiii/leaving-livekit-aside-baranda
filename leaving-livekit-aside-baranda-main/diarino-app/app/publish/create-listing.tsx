@@ -1,3 +1,5 @@
+import { ReelLimitModal } from "../../components/account/ReelLimitModal";
+import { isReelLimitError, useReelQuota } from "../../lib/hooks/useReelPlans";
 import { useEffect, useRef, useState } from "react";
 import { KeyboardAvoid } from "../../components/shared/KeyboardAvoid";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -71,6 +73,9 @@ export default function CreateListingScreen() {
   const { data: draft } = useDraftById(draftId);
   const { save: saveDraft, remove: removeDraft } = useDraftMutations();
   const createProperty = useCreateProperty();
+  // ↔ الحد الأقصى للريلز (20 مجانًا أو حد الباقة): نتحقق قبل أى ضغط/رفع كى لا يُرفع ملف ثم يُرفض النشر، والخادم هو الحاكم النهائى (reel_limit_reached).
+  const quotaQuery = useReelQuota(user?.id);
+  const [limitOpen, setLimitOpen] = useState(false);
   const updateProperty = useUpdateProperty();
   const logMedia = useLogMedia();
   const [submitting, setSubmitting] = useState(false);
@@ -426,7 +431,8 @@ export default function CreateListingScreen() {
       const result = await uploadToCloudinary(
         uri,
         item.type,
-        item.type === "video" ? (p) => setPhaseProgress("upload", p, withCompression) : undefined
+        item.type === "video" ? (p) => setPhaseProgress("upload", p, withCompression) : undefined,
+        { fingerprintUri: item.url } // ↔ بصمة الأصل (لا الناتج المضغوط) فتُطابَق عند إعادة المحاولة فلا يُرفع الفيديو ثانيةً
       );
       logMedia.mutate({ ownerId: sellerId, type: item.type, context: "property", result });
       // ↔ الناتج المضغوط ملف مؤقت فى الكاش: يُحذف بعد رفعه بنجاح (الأصل يبقى كما اختاره المستخدم).
@@ -533,6 +539,15 @@ export default function CreateListingScreen() {
     if (!validate()) return;
     if (mediaMode === "video" && !videoItem) return;
     if (!user) return;
+
+    // ↔ بلوغ حد الريلز (إعلان جديد فقط؛ التعديل لا يزيد العدد): نافذة تخيّر المعلن بين حذف إعلان قديم أو الترقية بباقة شهرية.
+    if (!editingAd) {
+      const fresh = (await quotaQuery.refetch()).data ?? quotaQuery.data;
+      if (fresh && !fresh.unavailable && !fresh.canPublish) {
+        setLimitOpen(true);
+        return;
+      }
+    }
 
     // ↔ قبل أى ضغط/رفع: نتأكد إن كل ملف محلى لسه موجود. لو اتمسح (مسودة قديمة/كاش النظام) نقول أى ملف بالتحديد ونوقف بدل خطأ عام.
     const localItems = [videoItem, coverItem, ...photoItems].filter((m): m is MediaItem => !!m && isLocalMedia(m.url));
@@ -675,6 +690,12 @@ export default function CreateListingScreen() {
       router.replace("/(tabs)/account?tab=ads");
     } catch (err) {
       console.warn("Publish listing failed:", err);
+      // ↔ الخادم رفض النشر لبلوغ حد الريلز (حالة سباق أو عدّاد قديم): نفس النافذة.
+      if (isReelLimitError(err)) {
+        void quotaQuery.refetch();
+        setLimitOpen(true);
+        return;
+      }
       // ↔ انتهت نافذة الـ 24 ساعة من النشر: الخادم رفض التعديل (migration 20261021000000).
       if (String((err as { message?: string })?.message ?? "").includes("edit_window_closed")) {
         showToast(t("انتهت مدة التعديل (24 ساعة من نشر الإعلان)"));
@@ -970,7 +991,9 @@ export default function CreateListingScreen() {
         <View style={styles.legalBox}>
           <Text style={styles.legalTitle}>{t("رسوم التطبيق")}</Text>
           <Text style={styles.legalText}>
-            {dealFeeKnown
+            {dealFeeKnown && !dealSettings.feesEnabled
+              ? t("نشر الإعلان مجاني، وخدمة «تم البيع / تم الإيجار» مجانية حاليًا دون أي رسوم. وإن فُعِّلت رسوم لاحقًا فيُخطر بها الناشرون قبل سريانها بـ 30 يومًا وفق سياسة البيع والرسوم.")
+              : dealFeeKnown
               ? `${t("نشر الإعلان مجاني. يُستحق رسم")} ${dealSettings.feeEgp.toLocaleString("en-US")} ${t("جنيه عند إتمام البيع أو التأجير فقط، ويتحمله البائع/المؤجّر أو الوسيط وحده، ولا يتحمل المشتري أو المستأجر أي رسم.")}`
               : `${t("نشر الإعلان مجاني. يُستحق رسم خدمة")} ${t("عند إتمام البيع أو التأجير فقط، ويتحمله البائع/المؤجّر أو الوسيط وحده، ولا يتحمل المشتري أو المستأجر أي رسم.")}`}
           </Text>
@@ -1029,6 +1052,7 @@ export default function CreateListingScreen() {
         progress={uploadUi?.value ?? 0}
         withCompression={uploadUi?.withCompression ?? false}
       />
+      <ReelLimitModal visible={limitOpen} onClose={() => setLimitOpen(false)} />
     </KeyboardAvoid>
   );
 }

@@ -112,7 +112,7 @@ export default function SellerProfileScreen() {
   // still merged in separately since they're never real DB rows —
   // exactly what useProperties() did before, just without needing every
   // real listing in the whole app to do it.
-  const { data: myListings, isLoading: listingsLoading } = useMyProperties(id);
+  const { data: myListings, isLoading: listingsLoading } = useMyProperties(id, { includeInactive: false });
   // ↔ المثبّتة (حد أقصى 3، الأحدث تثبيتًا أولًا) بتظهر فى أول صفحة المعلن، وبعدها
   // باقى الإعلانات بترتيبها الأصلى. أى مثبّتة زيادة عن الحد (بيانات قديمة) بتتعرض
   // كإعلان عادى من غير شارة.

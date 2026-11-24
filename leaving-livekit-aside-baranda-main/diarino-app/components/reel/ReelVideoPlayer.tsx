@@ -15,7 +15,7 @@ type Props = {
   uri: string;
   isActive: boolean;
   paused: boolean;
-  speed: 1 | 2;
+  speed: number; // ↔ 0.75–2 (سرعة المستخدم المختارة، أو 2 أثناء الضغط المطوّل)
   autoAdvance: boolean;
   muted: boolean;
   onPosition: (currentSec: number, durationSec: number) => void;

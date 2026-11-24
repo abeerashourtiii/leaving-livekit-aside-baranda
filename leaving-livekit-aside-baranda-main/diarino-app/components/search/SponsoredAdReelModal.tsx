@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { trackSignal } from "../../lib/recommendation/store";
+import { markNotInterested, trackSignal } from "../../lib/recommendation/store";
 import { usePiPActive } from "../../lib/pipState";
 import { buildReelLink } from "../../lib/shareLinks";
 import { Modal, View, Pressable, StyleSheet, Share } from "react-native";
@@ -8,6 +8,7 @@ import Svg, { Path } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Property, fmtPrice } from "../../lib/types";
 import { ReelCard } from "../reel/ReelCard";
+import { ReelHeightSourceContext } from "../../lib/uiConstants";
 import { ReelOptionsSheet } from "../reel/ReelOptionsSheet";
 import { ReportModal } from "../shared/ReportModal";
 import { useFollows } from "../../lib/hooks/useFollows";
@@ -70,6 +71,7 @@ export function SponsoredAdReelModal({ property, sponsoredReelId, onClose }: Pro
 
   return (
     <Modal visible={visible} animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <ReelHeightSourceContext.Provider value="window">
       <View style={styles.container}>
         <ReelCard
           property={property}
@@ -99,12 +101,22 @@ export function SponsoredAdReelModal({ property, sponsoredReelId, onClose }: Pro
           </Pressable>
         )}
       </View>
+      </ReelHeightSourceContext.Provider>
 
       <ReelOptionsSheet
         visible={reportSheetOpen}
         onClose={() => setReportSheetOpen(false)}
         onOpenReport={() => setReportModalOpen(true)}
         hasMusic={!!property.music}
+        onInterested={() => {
+          trackSignal("interested", property);
+          showToast(t("تم — سنعرض لك ريلز مشابهة"));
+        }}
+        onNotInterested={() => {
+          const recorded = markNotInterested(property);
+          showToast(recorded ? t("تم — سنقلّل ظهور ريلز مشابهة") : t("تم إخفاء هذا الريل"));
+          onClose(); // الإعلان الممول المفتوح: نغلقه (لا قائمة تالية هنا)
+        }}
       />
       <ReportModal
         visible={reportModalOpen}

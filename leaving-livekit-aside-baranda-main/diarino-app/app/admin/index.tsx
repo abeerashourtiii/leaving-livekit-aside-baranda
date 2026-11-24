@@ -32,8 +32,10 @@ import { AdminUserActivityLog } from "../../components/admin/AdminUserActivityLo
 import { AdminMenuItems } from "../../components/admin/AdminMenuItems";
 import { AdminMusic } from "../../components/admin/AdminMusic";
 import { AdminDeals } from "../../components/admin/AdminDeals";
+import { AdminCompanies } from "../../components/admin/AdminCompanies";
 import { AdminOffers } from "../../components/admin/AdminOffers";
 import { AdminRequests } from "../../components/admin/AdminRequests";
+import { AdminMediaCleanup } from "../../components/admin/AdminMediaCleanup";
 import { useThemeColors, ThemeColors } from "../../lib/hooks/useThemeColors";
 
 type AdminPage =
@@ -52,8 +54,10 @@ type AdminPage =
   | "menuItems"
   | "music"
   | "deals"
+  | "companies"
   | "offers"
-  | "requests";
+  | "requests"
+  | "cleanup";
 
 const PAGES: {
   key: AdminPage;
@@ -77,9 +81,11 @@ const PAGES: {
   { key: "requests", icon: "📋", label: "إدارة الطلبات", title: "إدارة الطلبات", subtitle: "حذف الطلبات القديمة وغير الفعّالة (صاحب الطلب يحذف طلبه خلال 24 ساعة فقط)", section: "requests" },
   { key: "offers", icon: "🏷️", label: "العروض المقدمة", title: "العروض المقدمة", subtitle: "كل العروض على الريلز والطلبات (الكل / ريلز / طلبات) لمعرفة عمليات البيع الجارية عبر التطبيق", section: "offers" },
   { key: "deals", icon: "🤝", label: "الصفقات والرسوم", title: "الصفقات والرسوم", subtitle: "الصفقات المُبلَّغ عنها، متابعة رسوم البيع والتأجير وتحصيلها", section: "deals" },
+  { key: "companies", icon: "🏢", label: "الشركات والخدمات", title: "الشركات والخدمات", subtitle: "مراجعة الشركات الجديدة واعتمادها، اشتراكات إظهار الهاتف ومعرض الصور (100 ج.م/شهر)", section: "deals" },
   { key: "sponsoredReels", icon: "⭐", label: "الريلز المميزة", title: "الريلز المميزة", subtitle: "ترويج الريلز وإدارة الوصول والاستهداف", section: "sponsoredReels" },
   { key: "auditLog", icon: "🧾", label: "سجل التدقيق", title: "سجل تدقيق الأدمن", subtitle: "كل عملية أدمن على الريلز والبث والإعلانات", section: "auditLog" },
   { key: "userActivity", icon: "🕒", label: "نشاط المستخدمين", title: "سجل نشاط المستخدمين", subtitle: "تسجيلات الدخول وتغييرات الأدوار", section: "userActivity" },
+  { key: "cleanup", icon: "🧹", label: "تنظيف Cloudinary", title: "تنظيف ملفات Cloudinary", subtitle: "حذف ملفات الوسائط اليتيمة وتوفير التخزين والنقل", superAdminOnly: true },
   { key: "admins", icon: "👑", label: "المشرفون", title: "إدارة المشرفين", subtitle: "منح أو إزالة صلاحيات المشرفين", superAdminOnly: true },
 ];
 
@@ -95,7 +101,7 @@ export default function AdminScreen() {
   const dbStatus = useAdminDBStatus();
   // ↔ علامات حمراء على «الريلز» (قيد المراجعة) و«الدعم» و«الصفقات والرسوم» + نقطة على زر القائمة لو فيه أى بند منتظر.
   const { data: pending, refetch: refetchPending } = useAdminPendingCounts(isAdmin);
-  const badgeFor = (key: AdminPage): number => (key === "reels" ? pending?.reels : key === "reports" ? pending?.support : key === "deals" ? pending?.deals : 0) ?? 0;
+  const badgeFor = (key: AdminPage): number => (key === "reels" ? pending?.reels : key === "reports" ? pending?.support : key === "deals" ? pending?.deals : key === "companies" ? pending?.companies : 0) ?? 0;
   const anyPending = (pending?.reels ?? 0) + (pending?.support ?? 0) + (pending?.deals ?? 0) > 0;
   useEffect(() => {
     if (isAdmin) void refetchAdminDB();
@@ -192,12 +198,14 @@ export default function AdminScreen() {
         {current.key === "menuItems" && <AdminMenuItems />}
         {current.key === "music" && <AdminMusic />}
         {current.key === "deals" && <AdminDeals />}
+        {current.key === "companies" && <AdminCompanies />}
         {current.key === "offers" && <AdminOffers />}
         {current.key === "requests" && <AdminRequests />}
         {current.key === "sponsoredReels" && <AdminSponsoredReels />}
         {current.key === "auditLog" && <AdminAuditLog />}
         {current.key === "userActivity" && <AdminUserActivityLog />}
         {current.key === "admins" && <AdminManagement />}
+            {current.key === "cleanup" && <AdminMediaCleanup />}
       </ScrollView>
 
       {/* القائمة الجانبية (Drawer Sidebar Modal) */}

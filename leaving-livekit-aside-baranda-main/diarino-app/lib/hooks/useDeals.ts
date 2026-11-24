@@ -16,6 +16,9 @@ export type DealSettings = {
   notifyDays: number;
   payDays: number;
   paymentInstructions: string | null;
+  // ↔ هل تُحتسب رسوم عند «تم البيع / تم الإيجار»؟ false = الخدمة مجانية (يُغلق الإعلان بلا رسم ولا فاتورة). المفتاح من لوحة الأدمن
+  //   (migration 20261121000000_deal_fees_toggle.sql). لو العمود/الجدول غير موجود (migration لم تُطبَّق) = true أى السلوك القديم.
+  feesEnabled: boolean;
 };
 
 export const DEFAULT_DEAL_SETTINGS: DealSettings = {
@@ -25,6 +28,7 @@ export const DEFAULT_DEAL_SETTINGS: DealSettings = {
   notifyDays: 7,
   payDays: 7,
   paymentInstructions: null,
+  feesEnabled: true,
 };
 
 export type Deal = {
@@ -94,6 +98,7 @@ export function useDealSettings() {
         notifyDays: data.notify_days,
         payDays: data.pay_days,
         paymentInstructions: data.payment_instructions,
+        feesEnabled: data.fees_enabled == null ? DEFAULT_DEAL_SETTINGS.feesEnabled : !!data.fees_enabled,
       };
     },
     staleTime: 5 * 60_000,
@@ -123,6 +128,21 @@ export function useUpdateDealSettings() {
           payment_instructions: input.paymentInstructions?.trim() || null,
           updated_at: new Date().toISOString(),
         })
+        .eq("id", true);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["dealSettings"] }),
+  });
+}
+
+// ↔ تشغيل/إيقاف رسوم «تم البيع / تم الإيجار» (المشرف الرئيسى فقط — سياسة RLS على deal_settings هى الإنفاذ الفعلى).
+export function useSetDealFeesEnabled() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const { error } = await supabase
+        .from("deal_settings")
+        .update({ fees_enabled: enabled, updated_at: new Date().toISOString() })
         .eq("id", true);
       if (error) throw error;
     },

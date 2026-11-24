@@ -1,3 +1,4 @@
+import { requestOwnMediaCleanup } from "../mediaCleanupClient";
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../supabase";
 import { Property, MediaItem, Purpose } from "../types";
@@ -15,7 +16,7 @@ type PropertyRowBase = {
   negotiable: boolean | null; finish_type: string | null; status: string | null; delivery_date: string | null;
   features: string[]; description: string; media: MediaItem[]; cover_image: string | null; music: string | null;
   captions_ar: string | null; captions_en: string | null;
-  pinned: boolean; pinned_at: string | null; moderation_status?: string | null; moderation_reason?: string | null; published_at?: string | null; rights_declared_at?: string | null; closed_type?: string | null; comment_count?: number | null; likes: number; saves: number; views: number; chats: number;
+  pinned: boolean; pinned_at: string | null; moderation_status?: string | null; moderation_reason?: string | null; published_at?: string | null; rights_declared_at?: string | null; closed_type?: string | null; is_active?: boolean | null; comment_count?: number | null; likes: number; saves: number; views: number; chats: number;
   created_at: string; share_platforms: string[] | null;
 };
 type PropertyRow = PropertyRowBase & { profiles: ProfileRowPublic | null };
@@ -59,6 +60,7 @@ function rowToProperty(row: PropertyRow): Property {
     moderationReason: row.moderation_reason ?? undefined,
     publishedAt: row.published_at ? new Date(row.published_at).getTime() : undefined,
     closedType: row.closed_type === "sold" || row.closed_type === "rented" ? row.closed_type : undefined,
+    isActive: row.is_active === false ? false : undefined,
     rightsDeclaredAt: row.rights_declared_at ?? undefined,
     createdAtRaw: row.created_at,
     sharePlatforms: row.share_platforms || [],
@@ -87,7 +89,7 @@ function rowToProperty(row: PropertyRow): Property {
 const PROPERTY_COLUMNS =
   "id, seller_id, purpose, type, title, short_title, province, location, lat, lng, price, area, rooms, baths, reception, floor, payment, " +
   "negotiable, finish_type, status, delivery_date, features, description, media, cover_image, music, captions_ar, captions_en, " +
-  "pinned, pinned_at, moderation_status, moderation_reason, published_at, rights_declared_at, closed_type, comment_count, " +
+  "pinned, pinned_at, moderation_status, moderation_reason, published_at, rights_declared_at, closed_type, is_active, comment_count, " +
   "likes, saves, views, chats, created_at, share_platforms";
 const PROFILE_JOIN = "profiles_public!seller_id(id, full_name, avatar_url, verified)";
 const SELECT_NARROW = `${PROPERTY_COLUMNS}, ${PROFILE_JOIN}`;
@@ -117,11 +119,15 @@ async function runPropertyQuery(
 // وآمن عبر get_property_contact_phone() (شوف useSellerContactPhone تحت
 // وميجريشن 20260901000000_property_contact_phone.sql).
 
+// ↔ الإعلان «غير النشط» لا يظهر فى القوائم العامة (بحث/ريلز/خريطة/مفضلة...) حتى لصاحبه (الذى تسمح له RLS برؤية إعلاناته)؛ يظهر فقط فى «إعلاناتي».
+//   لغير صاحبه تُخفيه سياسة RLS أصلًا — هذا الفلتر هو الطبقة الثانية (وهو الذى يعمل لو الـ migration لم تُطبَّق بعد فلا يوجد العمود).
+const isListed = (p: Property) => p.isActive !== false;
+
 async function fetchProperties(): Promise<Property[]> {
   // ↔ الإعلان المُغلق بصفقة (تم البيع / تم الإيجار) لا يظهر فى الريلز: يبقى فقط فى إدارة الحساب وصفحة المعلن.
   const { data, error } = await runPropertyQuery((sel) => supabase.from("properties").select(sel).is("closed_at", null).order("created_at", { ascending: false }).limit(300));
   if (error) throw error;
-  return (data as unknown as PropertyRow[]).map(rowToProperty);
+  return (data as unknown as PropertyRow[]).map(rowToProperty).filter(isListed);
 }
 
 async function fetchPropertiesBySeller(sellerId: string): Promise<Property[]> {
@@ -207,7 +213,7 @@ async function fetchPropertiesPage(filters: PropertyPageFilters, cursor: PageCur
   };
   const { data, error } = await runPropertyQuery(buildPage);
   if (error) throw error;
-  return (data as unknown as PropertyRow[]).map(rowToProperty);
+  return (data as unknown as PropertyRow[]).map(rowToProperty).filter(isListed);
 }
 
 // ↔ إزالة التكرار بالـ id عند دمج الصفحات (حماية إضافية للمؤشر ولتحديثات الكاش المتفائلة) — يحافظ على أول ظهور وعلى شكل pages.
@@ -242,7 +248,7 @@ export function usePropertiesByIds(ids: string[]) {
       if (!ids.length) return [];
       const { data, error } = await runPropertyQuery((sel) => supabase.from("properties").select(sel).in("id", ids));
       if (error) throw error;
-      return (data as unknown as PropertyRow[]).map(rowToProperty);
+      return (data as unknown as PropertyRow[]).map(rowToProperty).filter(isListed);
     },
     enabled: ids.length > 0,
     staleTime: 30_000,
@@ -253,7 +259,7 @@ async function fetchPropertiesPreservingOrder(ids: string[]): Promise<Property[]
   if (!ids.length) return [];
   const { data, error } = await runPropertyQuery((sel) => supabase.from("properties").select(sel).in("id", ids));
   if (error) throw error;
-  const byId = new Map((data as unknown as PropertyRow[]).map((r) => [r.id, rowToProperty(r)]));
+  const byId = new Map((data as unknown as PropertyRow[]).map((r) => [r.id, rowToProperty(r)] as const).filter(([, p]) => isListed(p)));
   return ids.map((id) => byId.get(id)).filter((p): p is Property => !!p);
 }
 
@@ -378,10 +384,15 @@ export const MAX_PINNED_PROPERTIES = 3;
 // ↔ «إعلاناتي» لازم تعكس الحالة الحقيقية فى كل مرة تتفتح: staleTime 0 +
 // refetchOnMount "always" (قبل كده 10 ثوانى كاش كانت ممكن تخلّى إعلان لسه
 // منشور ما يظهرش لو الشاشة اتفتحت بسرعة).
-export function useMyProperties(sellerId: string | undefined) {
+// ↔ includeInactive=false فى صفحة المعلن (لا تعرض الإعلانات «غير النشطة» حتى لصاحبها)؛ الافتراضى true لإدارة الحساب وتعديل الإعلان.
+export function useMyProperties(sellerId: string | undefined, options?: { includeInactive?: boolean }) {
+  const includeInactive = options?.includeInactive !== false;
   return useQuery({
-    queryKey: ["properties", "bySeller", sellerId],
-    queryFn: () => fetchPropertiesBySeller(sellerId!),
+    queryKey: ["properties", "bySeller", sellerId, includeInactive ? "all" : "listed"],
+    queryFn: async () => {
+      const all = await fetchPropertiesBySeller(sellerId!);
+      return includeInactive ? all : all.filter(isListed);
+    },
     enabled: !!sellerId,
     staleTime: 0,
     refetchOnMount: "always",
@@ -441,7 +452,7 @@ export function useCreateProperty() {
       // فيظهر مباشرة بعد النشر — وبعدها الجلب الحقيقى من الخادم يصحّح أى فرق.
       try {
         const created = rowToProperty({ ...(data as unknown as PropertyRowBase), profiles: null });
-        qc.setQueryData<Property[]>(["properties", "bySeller", created.seller.id], (old) => [
+        qc.setQueryData<Property[]>(["properties", "bySeller", created.seller.id, "all"], (old) => [
           created,
           ...(old ?? []).filter((p) => p.id !== created.id),
         ]);
@@ -511,6 +522,24 @@ export function useDeleteProperty() {
       const { data, error } = await supabase.from("properties").delete().eq("id", id).select("id");
       if (error) throw error;
       if (!data || data.length === 0) throw new Error("delete_not_applied");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["properties"] });
+      qc.invalidateQueries({ queryKey: ["reelQuota"] }); // ↔ الحذف يحرّر مكانًا من حد الريلز فورًا
+      requestOwnMediaCleanup(); // ↔ حذف صور/فيديوهات الإعلان من Cloudinary فورًا عبر الخادم (lib/mediaCleanupClient.ts)
+    },
+  });
+}
+
+// ↔ «غير نشط» / «تنشيط الإعلان» (من كارت الإعلان فى إدارة الحساب): يوقف نشر الإعلان فى البحث وصفحة المعلن والريلز أو يعيده.
+//   التعديل مسموح لصاحب الإعلان فى أى وقت (حتى بعد نافذة الـ 24 ساعة؛ العمود مستثنى من properties_edit_window_guard — migration 20261122000000).
+export function useSetPropertyActive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
+      const { data, error } = await supabase.from("properties").update({ is_active: active }).eq("id", id).select("id");
+      if (error) throw error;
+      if (!data || data.length === 0) throw new Error("toggle_not_applied");
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["properties"] }),
   });

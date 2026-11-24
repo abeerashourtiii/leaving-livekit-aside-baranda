@@ -46,10 +46,14 @@ export type InterestProfile = {
   /** وقت آخر تطبيق للتضاؤل (ms). */
   decayedAt: number;
   updatedAt: number;
+  /** ريلز اختار المستخدم «غير مهتم» بها (id ← وقت الاختيار): تُستبعد من الترتيب نهائيًا (حتى يختار «مهتم» أو يصفّر ملف التوصية). */
+  hidden?: Record<string, number>;
 };
 
 export type SignalKind =
-  | "like" | "unlike" | "comment" | "share" | "save" | "unsave" | "follow" | "unfollow" | "detail";
+  | "like" | "unlike" | "comment" | "share" | "save" | "unsave" | "follow" | "unfollow" | "detail"
+  // ↔ «مهتم» / «غير مهتم» من قائمة خيارات الريل: إشارة صريحة أقوى من الإعجاب (تُسجَّل على خصائص الريل: النوع والغرض والمحافظة والمعلن والسعر والغرف...).
+  | "interested" | "not_interested";
 
 export type WatchInfo = {
   /** مدة المشاهدة الفعلية (النشط وغير الموقوف) بالمللى ثانية. */
@@ -67,7 +71,8 @@ export const RECO = {
   MAX_FEATURES: 400,           // أقصى عدد خصائص محفوظة (يُحذف الأضعف)
   MAX_SEEN: 400,
   FEATURE_WEIGHT: { type: 1.0, purpose: 0.7, province: 0.9, seller: 1.3, price: 0.6, rooms: 0.4, feat: 0.25 } as Record<string, number>,
-  SIGNAL: { share: 6, comment: 5, save: 5, follow: 8, like: 4, detail: 2, search: 3 } as Record<string, number>,
+  SIGNAL: { share: 6, comment: 5, save: 5, follow: 8, like: 4, detail: 2, search: 3, interested: 7, not_interested: 10 } as Record<string, number>,
+  MAX_HIDDEN: 120,             // أقصى عدد ريلز «غير مهتم» محفوظة (الأقدم يُحذف) — صغير عمدًا: جدول user_interest_profiles محدود بـ 64KB (يُشارك المساحة مع w وseen)
   SKIP_MS: 1500,               // أقل من هذا = تخطّى فورًا
   QUICK_SKIP_MS: 3000,
   COMPLETE_RATIO: 0.9,
@@ -139,6 +144,13 @@ function prune(profile: InterestProfile) {
     keys.sort((a, b) => Math.abs(profile.w[b]) - Math.abs(profile.w[a]));
     for (const k of keys.slice(RECO.MAX_FEATURES)) delete profile.w[k];
   }
+  if (profile.hidden) {
+    const hiddenIds = Object.keys(profile.hidden);
+    if (hiddenIds.length > RECO.MAX_HIDDEN) {
+      hiddenIds.sort((a, b) => profile.hidden![b] - profile.hidden![a]);
+      for (const id of hiddenIds.slice(RECO.MAX_HIDDEN)) delete profile.hidden[id];
+    }
+  }
   const ids = Object.keys(profile.seen);
   if (ids.length > RECO.MAX_SEEN) {
     ids.sort((a, b) => profile.seen[b].t - profile.seen[a].t);
@@ -193,6 +205,14 @@ export function applySignal(profile: InterestProfile, p: RecoProperty, kind: Sig
       break;
     case "unfollow":
       bump(profile, feats.filter((f) => f.key.startsWith("seller:")), -S.follow);
+      break;
+    case "interested":
+      bump(profile, feats, S.interested);
+      if (profile.hidden && profile.hidden[p.id] !== undefined) delete profile.hidden[p.id]; // رجع مهتمًا: يعود الريل مؤهلًا للظهور
+      break;
+    case "not_interested":
+      bump(profile, feats, -S.not_interested);
+      profile.hidden = { ...(profile.hidden ?? {}), [p.id]: now };
       break;
   }
   profile.n += 1;
@@ -327,6 +347,8 @@ export function rankFeed<T extends RecoProperty>(
   profile: InterestProfile,
   ctx: RankContext
 ): T[] {
+  // ↔ «غير مهتم»: تُستبعد هذه الريلز من الترتيب نهائيًا.
+  if (profile.hidden) candidates = candidates.filter((c) => profile.hidden![c.id] === undefined);
   if (candidates.length <= 1) return candidates.slice();
   decayProfile(profile, ctx.now);
   let maxPopLog = 0;
@@ -371,7 +393,11 @@ export function parseProfile(raw: unknown, now: number): InterestProfile {
     for (const [k, v] of Object.entries(o.w ?? {})) if (typeof v === "number" && isFinite(v)) w[k] = Math.max(-RECO.WEIGHT_CAP, Math.min(RECO.WEIGHT_CAP, v));
     const seen: Record<string, SeenEntry> = {};
     for (const [k, v] of Object.entries(o.seen ?? {})) if (v && typeof v.t === "number") seen[k] = { t: v.t, c: Number(v.c) || 1, done: !!v.done };
-    return { v: PROFILE_VERSION, w, seen, n: Number(o.n) || 0, decayedAt: Number(o.decayedAt) || now, updatedAt: Number(o.updatedAt) || now };
+    const hidden: Record<string, number> = {};
+    for (const [k, v] of Object.entries(o.hidden ?? {})) if (typeof v === "number" && isFinite(v)) hidden[k] = v;
+    const out: InterestProfile = { v: PROFILE_VERSION, w, seen, n: Number(o.n) || 0, decayedAt: Number(o.decayedAt) || now, updatedAt: Number(o.updatedAt) || now };
+    if (Object.keys(hidden).length) out.hidden = hidden;
+    return out;
   } catch {
     return emptyProfile(now);
   }

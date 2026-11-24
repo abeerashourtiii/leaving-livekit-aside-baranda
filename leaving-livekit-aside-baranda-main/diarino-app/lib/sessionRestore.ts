@@ -19,7 +19,7 @@ const ROUTE_KEY = "baranda:resume:route";
 const REEL_KEY = "baranda:resume:reel";
 
 // صفحات ما ينفعش نرجّع لها: شاشة الدخول والتفعيل (فيها توكن/حالة مؤقتة)، والبث المباشر، وإكمال البيانات الإجبارى.
-const NOT_RESUMABLE = ["/auth-callback", "/auth-email", "/reset-password", "/live", "/coming-soon", "/invoice", "/promotion-invoice"];
+const NOT_RESUMABLE = ["/auth-callback", "/auth-email", "/reset-password", "/live", "/coming-soon", "/invoice", "/promotion-invoice", "/reel-plan-invoice", "/company-plan-invoice"];
 
 export function isResumable(href: string | null | undefined): href is string {
   if (!href) return false;
